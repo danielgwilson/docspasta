@@ -52,12 +52,9 @@ export default function SettingsPanel() {
     },
   });
 
-  const handleSave = () => {
-    localStorage.setItem("openai_api_key", apiKey);
-    toast({
-      title: "Settings Saved",
-      description: "Your API key has been saved",
-    });
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    localStorage.setItem("openai_api_key", value);
   };
 
   const handleTest = () => {
@@ -85,14 +82,14 @@ export default function SettingsPanel() {
               <Input
                 type="password"
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
                 placeholder="sk-..."
               />
+              <p className="text-sm text-muted-foreground">
+                API key is saved automatically
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSave}>
-                Save
-              </Button>
+            <div>
               <Button 
                 variant="outline" 
                 onClick={handleTest}

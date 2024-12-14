@@ -1,3 +1,5 @@
+import { JSDOM } from 'jsdom';
+
 export async function fetchPage(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -7,8 +9,8 @@ export async function fetchPage(url: string): Promise<string> {
 }
 
 export function extractLinks(html: string, baseUrl: string): string[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
   
   const links = Array.from(doc.querySelectorAll('a[href]'))
     .map(a => a.getAttribute('href'))
@@ -26,7 +28,7 @@ export function extractLinks(html: string, baseUrl: string): string[] {
         const parsedUrl = new URL(url);
         const baseUrlObj = new URL(baseUrl);
         return parsedUrl.hostname === baseUrlObj.hostname &&
-               url.includes('/docs/') || url.includes('/documentation/');
+               (url.includes('/docs/') || url.includes('/documentation/'));
       } catch {
         return false;
       }
@@ -36,8 +38,8 @@ export function extractLinks(html: string, baseUrl: string): string[] {
 }
 
 export function extractTitle(html: string): string {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
   const title = doc.querySelector('title')?.textContent;
   return title || 'Untitled Page';
 }
