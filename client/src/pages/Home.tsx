@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useCallback, useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress"; 
+import { Skeleton } from "@/components/ui/skeleton";
 import SettingsPanel from "@/components/ui/settings-panel";
 import ResultsList from "@/components/ui/results-list";
+import { ArrowRight } from "lucide-react";
 
 export type CrawlResult = {
   url: string;
@@ -74,16 +76,47 @@ export default function Home() {
     crawlMutation.mutate(url);
   };
 
+  // Preview URL mutation
+  const previewMutation = useMutation({
+    mutationFn: async (input: string) => {
+      const response = await fetch("/api/preview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: input }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      return response.json();
+    },
+  });
+
+  // Debounced URL preview
+  useEffect(() => {
+    if (!url) return;
+    
+    const timeoutId = setTimeout(() => {
+      previewMutation.mutate(url);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [url]);
+
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto space-y-8">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              DocCrawler
+              DocsPasta
             </CardTitle>
+            <SettingsPanel />
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <form onSubmit={handleSubmit} className="flex gap-4">
               <Input
                 type="url"
@@ -99,10 +132,32 @@ export default function Home() {
                 {crawlMutation.isPending ? "Crawling..." : "Crawl"}
               </Button>
             </form>
+
+            {url && !crawlMutation.isPending && (
+              <Card className="border-dashed">
+                <CardContent className="pt-6">
+                  {previewMutation.isPending ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-4 w-full" />
+                    </div>
+                  ) : previewMutation.isError ? (
+                    <p className="text-sm text-muted-foreground">
+                      Enter a valid documentation URL to see a preview
+                    </p>
+                  ) : previewMutation.data ? (
+                    <div className="space-y-2">
+                      <h3 className="font-medium">{previewMutation.data.title}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {previewMutation.data.description}
+                      </p>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            )}
           </CardContent>
         </Card>
-
-        <SettingsPanel />
 
         {crawlMutation.isPending && (
           <Card>

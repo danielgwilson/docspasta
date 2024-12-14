@@ -1,14 +1,27 @@
 import { useState, useEffect } from "react";
-import { 
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger 
-} from "@/components/ui/accordion";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
+import { Settings, Trash2 } from "lucide-react";
 
 export default function SettingsPanel() {
   const [apiKey, setApiKey] = useState("");
@@ -70,37 +83,72 @@ export default function SettingsPanel() {
   };
 
   return (
-    <Accordion type="single" collapsible>
-      <AccordionItem value="settings">
-        <AccordionTrigger>Settings</AccordionTrigger>
-        <AccordionContent>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                OpenAI API Key
-              </label>
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <Settings className="h-5 w-5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              OpenAI API Key
+            </label>
+            <div className="flex gap-2">
               <Input
                 type="password"
                 value={apiKey}
                 onChange={(e) => handleApiKeyChange(e.target.value)}
                 placeholder="sk-..."
               />
-              <p className="text-sm text-muted-foreground">
-                API key is saved automatically
-              </p>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear API Key?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will remove your saved OpenAI API key. You'll need to enter it again to use the application.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => {
+                      localStorage.removeItem("openai_api_key");
+                      setApiKey("");
+                      toast({
+                        title: "API Key Cleared",
+                        description: "Your API key has been removed",
+                      });
+                    }}>
+                      Clear
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
-            <div>
-              <Button 
-                variant="outline" 
-                onClick={handleTest}
-                disabled={testKeyMutation.isPending}
-              >
-                {testKeyMutation.isPending ? "Testing..." : "Test Key"}
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              API key is saved automatically
+            </p>
           </div>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
+          <div>
+            <Button 
+              variant="outline" 
+              onClick={handleTest}
+              disabled={testKeyMutation.isPending}
+            >
+              {testKeyMutation.isPending ? "Testing..." : "Test Key"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -2,10 +2,34 @@ import type { Express } from "express";
 import { createServer } from "http";
 import { processDocPage } from "../client/src/lib/openai";
 import { fetchPage, extractLinks, extractTitle } from "../client/src/lib/crawler";
+import { JSDOM } from 'jsdom';
 
 export function registerRoutes(app: Express) {
   const httpServer = createServer(app);
   
+  // Preview URL metadata
+  app.post("/api/preview", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ error: "URL is required" });
+      }
+
+      const html = await fetchPage(url);
+      const dom = new JSDOM(html);
+      const doc = dom.window.document;
+      
+      const title = doc.querySelector('title')?.textContent || 'Untitled Page';
+      const description = doc.querySelector('meta[name="description"]')?.getAttribute('content') ||
+                         doc.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
+                         'No description available';
+
+      res.json({ title, description });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test OpenAI API key
   app.post("/api/test-key", async (req, res) => {
     try {
