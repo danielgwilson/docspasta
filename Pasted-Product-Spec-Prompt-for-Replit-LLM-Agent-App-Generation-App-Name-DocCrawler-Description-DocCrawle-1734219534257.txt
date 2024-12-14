@@ -1,0 +1,114 @@
+Product Spec Prompt for Replit LLM Agent App Generation
+App Name: DocCrawler
+
+Description:
+DocCrawler is a web-based crawler tool that helps developers quickly retrieve and format text-based versions of programming documentation pages. Similar in spirit to tools like "Repomix," it aims to provide easily copyable, AI-friendly text outputs of docs, suitable for feeding into LLMs for code analysis, summarization, or knowledge extraction.
+
+Primary Goal:
+Enable users to input a documentation page URL, crawl linked pages within the same documentation site, and produce a well-formatted, copy-ready text representation of all relevant documentation. The tool should automatically detect whether a page is likely a programming doc page and use OpenAI’s API to refine the detection and formatting.
+
+Core Features
+URL Input Bar
+
+A simple text input field at the top of the page for the user to paste a single documentation page URL.
+A "Crawl" button next to the URL input that initiates the crawling process.
+Settings Section (Hidden/Accordion)
+
+An expandable/collapsible accordion section labeled "Settings."
+Within the expanded section, a text input field to provide the user’s own OpenAI API key.
+The API key should be securely stored in the browser’s local storage or cookies.
+A "Save" button to store the API key, and a "Test Key" button to validate it (e.g., make a small call to confirm correctness).
+This section should be hidden by default and only visible when the user explicitly expands it.
+Crawler Functionality
+
+Upon clicking "Crawl," the app will:
+Use the provided URL as a starting point.
+Fetch the HTML of the page via HTTP requests.
+Identify and follow internal documentation links (same domain, relative links within a docs section).
+Respect robots.txt or a configured maximum depth to prevent infinite crawling.
+As each page is fetched:
+Send the raw page content to the OpenAI API (using the user-provided key) to:
+Determine if this page is a valid "programming documentation" page.
+If valid, return a cleaned, nicely formatted markdown-like text version of the docs.
+If not valid, skip or mark as invalid.
+The crawler should handle up to a configurable number of pages (default: a small number like 20 to prevent API overuse on first run).
+Results / Output Section
+
+While crawling is in progress, show a loading skeleton or spinner.
+As each page completes:
+Display a list item with the page title and URL, and a status (Processing… / Complete).
+When processing is complete, show a preview (e.g., first few lines of the cleaned doc text).
+Once crawling finishes, the user should see:
+A list of all processed documentation pages, each with a title, URL, and a "Copy" button that copies the full extracted text of that page.
+A "Copy All" button that concatenates all extracted doc texts into a single large text block and copies it to the clipboard.
+The formatting should be markdown-friendly (e.g., code blocks preserved, headings for section titles, etc.).
+Error Handling
+
+If a page fails to fetch (HTTP error), mark it as "Error" and continue with the next link.
+If the OpenAI request fails (e.g., bad API key, rate limit), show a user-facing error message and pause/retry logic.
+Ensure that partial results are still available, even if some pages fail.
+Technical Details / Implementation Notes
+Front-End Stack:
+
+HTML/CSS/JS front-end, possibly using a lightweight framework (React or vanilla JS) since it’s on Replit.
+Accordion settings panel can be implemented with a simple CSS/JS toggle.
+Storing API Key:
+
+Use localStorage or cookies to store the user’s OpenAI API key.
+On page load, prefill the OpenAI API key field if previously stored.
+OpenAI Integration:
+
+On each page fetch:
+Extract the main content from the HTML.
+Send the text to the OpenAI API with a prompt like: "Determine if this is programming documentation. If yes, return a clean, markdown-formatted summary of the page’s content (including code blocks and headings). If no, respond with a short message indicating it’s not valid docs."
+If determined valid, store the returned markdown text. Otherwise, mark the page as invalid.
+Link Extraction & Traversal:
+
+From the starting URL, parse the HTML and find internal links that appear to be part of the same docs site.
+Limit depth (e.g., 2 or 3 levels from the starting page) or a maximum page count to avoid infinite crawling.
+Keep track of visited URLs to prevent duplicates.
+Loading UI:
+
+Show a skeleton or spinner while the initial page is being processed.
+Update the UI incrementally as pages finish processing.
+Copy-to-Clipboard:
+
+For each completed page, provide a "Copy" button that copies the extracted doc text.
+Provide a "Copy All" button at the bottom to copy the concatenation of all doc pages that were considered valid.
+Scalability & Performance:
+
+Use a queue-like approach for crawling pages.
+Rate-limit requests to OpenAI’s API to avoid hitting rate limits.
+Implement error retries with a backoff strategy if desired.
+Example User Flow
+User Paste URL:
+User enters: https://docs.someprogramminglib.io/getting-started in the URL bar.
+
+Set API Key (optional step):
+User expands "Settings," pastes their OpenAI API key, clicks "Save," closes the settings.
+
+Crawl:
+User clicks "Crawl."
+
+UI shows a loading spinner.
+Fetch the starting page → send to OpenAI → check validity → return formatted markdown text → display "Getting Started" page in the results list.
+Extract internal links, queue them for processing.
+Process each in turn, updating the output UI as pages finish.
+Results:
+After all pages are processed or a max count is reached:
+
+Show a list of pages with their URLs and a snippet of their content.
+Each page: "Copy" button to copy that page’s text.
+A "Copy All" button at the end to copy everything as a single block.
+Errors (if any):
+If a page returns a 404, show "Error" next to that page’s URL. If OpenAI API key is invalid, show an error message at the top and pause crawling.
+
+Deliverables
+A Replit project that, when run, opens a web UI with:
+
+URL input + Crawl button on top.
+Accordion-based settings for OpenAI key.
+Loading/processing indicators.
+Incrementally updated results section.
+Copy-to-clipboard functionality.
+Well-commented code for maintainability.
