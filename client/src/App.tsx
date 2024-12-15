@@ -9,18 +9,14 @@ import Home from "./pages/Home";
 function App() {
   return (
     <ErrorBoundary>
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <ErrorBoundary>
-            <Switch>
-              <Route path="/" component={Home} />
-            </Switch>
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <Toaster />
-          </ErrorBoundary>
-        </QueryClientProvider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <Switch>
+            <Route path="/" component={Home} />
+          </Switch>
+          <Toaster />
+        </ToastProvider>
+      </QueryClientProvider>
     </ErrorBoundary>
   );
 }
