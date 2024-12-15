@@ -175,9 +175,7 @@ export default function Home() {
         <motion.form 
           className="relative"
           animate={{ 
-            y: crawlMutation.isPending ? -80 : 0,
-            scale: 1,
-            opacity: 1
+            y: crawlMutation.isPending ? -80 : 0
           }}
           transition={{ type: "spring", stiffness: 100 }}
           onSubmit={(e) => {
@@ -297,8 +295,7 @@ export default function Home() {
                 />
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>
-                    Processed: {results.filter(r => r.status === "complete").length} pages 
-                    {results.some(r => r.status === "processing") && " (scanning for more...)"}
+                    Processed: {results.filter(r => r.status === "complete").length} 
                   </span>
                   {results.length > 0 && (
                     <span>
