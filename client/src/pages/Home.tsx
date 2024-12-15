@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import SettingsPanel from "@/components/ui/settings-panel";
 import ResultsList from "@/components/ui/results-list";
 import CrawlSummary from "@/components/ui/crawl-summary";
-import { ArrowRight, Link2, Loader2 } from "lucide-react";
+import { ArrowRight, Link2, Loader2, FileText, Hash, Link as LinkIcon } from "lucide-react";
 
 export type CrawlResult = {
   url: string;
@@ -290,27 +290,86 @@ export default function Home() {
         )}
 
         {crawlMutation.isPending && (
-          <Card>
-            <CardContent className="pt-6">
-              <div className="space-y-2">
-                <Progress 
-                  value={results.filter(r => r.status === "complete").length} 
-                  max={Math.max(results.length, results.filter(r => r.status === "complete").length + 1)} 
-                  className="w-full"
-                />
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>
-                    Processed: {results.filter(r => r.status === "complete").length} 
-                  </span>
-                  {results.length > 0 && (
-                    <span>
-                      Currently processing: {results[results.length - 1].title}
-                    </span>
-                  )}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Card>
+              <CardContent className="pt-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Progress 
+                      value={results.filter(r => r.status === "complete").length} 
+                      max={Math.max(results.length, results.filter(r => r.status === "complete").length + 1)} 
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>
+                        Processed: {results.filter(r => r.status === "complete").length} 
+                      </span>
+                      {results.length > 0 && (
+                        <span className="truncate ml-2">
+                          Currently processing: {results[results.length - 1].title}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4 pt-2">
+                    <motion.div 
+                      className="space-y-1"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.1 }}
+                    >
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        <Hash className="w-3 h-3" />
+                        Tokens
+                      </div>
+                      <p className="text-lg font-semibold">
+                        {Intl.NumberFormat('en-US', { notation: 'compact' }).format(
+                          results.reduce((sum, r) => sum + (encode(r.content).length || 0), 0)
+                        )}
+                      </p>
+                    </motion.div>
+                    
+                    <motion.div 
+                      className="space-y-1"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.2 }}
+                    >
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        Words
+                      </div>
+                      <p className="text-lg font-semibold">
+                        {Intl.NumberFormat('en-US', { notation: 'compact' }).format(
+                          results.reduce((sum, r) => sum + r.content.split(/\s+/).length, 0)
+                        )}
+                      </p>
+                    </motion.div>
+                    
+                    <motion.div 
+                      className="space-y-1"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.3 }}
+                    >
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        <LinkIcon className="w-3 h-3" />
+                        Pages
+                      </div>
+                      <p className="text-lg font-semibold">
+                        {results.filter(r => r.status === "complete").length}
+                      </p>
+                    </motion.div>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </motion.div>
         )}
 
         {results.length > 0 && (
