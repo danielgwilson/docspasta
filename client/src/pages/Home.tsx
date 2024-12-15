@@ -13,7 +13,12 @@ import type { CrawlResult } from "@/types/crawler";
 export default function Home() {
   const [url, setUrl] = useState("");
   const [results, setResults] = useState<CrawlResult[]>([]);
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<{
+    maxDepth: number
+    includeCodeBlocks: boolean
+    excludeNavigation: boolean
+    followExternalLinks: boolean
+  }>({
     maxDepth: 3,
     includeCodeBlocks: true,
     excludeNavigation: true,
@@ -68,7 +73,7 @@ export default function Home() {
             });
           }
           
-          function pump(): Promise<void> {
+          async function pump(): Promise<void> {
             return reader.read().then(({done, value}) => {
               if (done) {
                 if (buffer.length > 0) processText(buffer);
@@ -175,7 +180,11 @@ export default function Home() {
           onUrlChange={setUrl}
           onSubmit={() => crawlMutation.mutate(url)}
           settings={settings}
-          onSettingsChange={setSettings}
+          onSettingsChange={(newSettings) => {
+            if (newSettings) {
+              setSettings(newSettings);
+            }
+          }}
         />
 
         <QuickActions
