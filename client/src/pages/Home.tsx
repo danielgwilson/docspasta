@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress"; 
@@ -158,11 +159,26 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-5xl mx-auto space-y-12">
-        <h1 className="text-5xl font-bold tracking-tight text-center">
-          What docs should I crawl for you?
-        </h1>
+        <AnimatePresence>
+          {!crawlMutation.isPending && (
+            <motion.h1
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="text-5xl font-bold tracking-tight text-center pt-12"
+            >
+              What docs should I crawl for you?
+            </motion.h1>
+          )}
+        </AnimatePresence>
 
-        <div className="relative">
+        <motion.div 
+          className="relative"
+          animate={{ 
+            y: crawlMutation.isPending ? -100 : 0 
+          }}
+          transition={{ type: "spring", stiffness: 100 }}
+        >
           <div className="relative flex items-center max-w-3xl mx-auto">
             <div className="relative flex-1">
               <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
@@ -197,19 +213,49 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="flex gap-2 justify-center">
-          <Button variant="outline" className="rounded-full text-sm">
-            Crawl React documentation →
-          </Button>
-          <Button variant="outline" className="rounded-full text-sm">
-            Extract Next.js API docs →
-          </Button>
-          <Button variant="outline" className="rounded-full text-sm">
-            Get Tailwind CSS examples →
-          </Button>
-        </div>
+        <AnimatePresence>
+          {!crawlMutation.isPending && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="flex gap-2 justify-center mt-4"
+            >
+              <Button 
+                variant="outline" 
+                className="rounded-full text-sm"
+                onClick={() => {
+                  setUrl("https://react.dev/reference/react");
+                  setTimeout(() => crawlMutation.mutate("https://react.dev/reference/react"), 100);
+                }}
+              >
+                Crawl React documentation →
+              </Button>
+              <Button 
+                variant="outline" 
+                className="rounded-full text-sm"
+                onClick={() => {
+                  setUrl("https://nextjs.org/docs");
+                  setTimeout(() => crawlMutation.mutate("https://nextjs.org/docs"), 100);
+                }}
+              >
+                Extract Next.js API docs →
+              </Button>
+              <Button 
+                variant="outline" 
+                className="rounded-full text-sm"
+                onClick={() => {
+                  setUrl("https://tailwindcss.com/docs/installation");
+                  setTimeout(() => crawlMutation.mutate("https://tailwindcss.com/docs/installation"), 100);
+                }}
+              >
+                Get Tailwind CSS examples →
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {url && !crawlMutation.isPending && previewMutation.data && (
           <Card className="border-dashed">
