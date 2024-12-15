@@ -84,9 +84,15 @@ export function registerRoutes(app: Express) {
       })}\n\n`);
 
       const CONCURRENT_REQUESTS = 5;
+      const MAX_PAGES = 50; // Maximum pages to crawl
       
       async function processBatch() {
-        if (queue.length === 0 || visited.size >= detectedPages) return;
+        if (queue.length === 0 || visited.size >= MAX_PAGES) {
+          // Send completion only when there are no more pages to process
+          res.write(`data: ${JSON.stringify({ type: 'complete', results })}\n\n`);
+          res.end();
+          return;
+        }
         
         const batch = [];
         while (batch.length < CONCURRENT_REQUESTS && queue.length > 0 && visited.size < MAX_PAGES) {

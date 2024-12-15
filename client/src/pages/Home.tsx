@@ -50,18 +50,24 @@ export default function Home() {
             lines.forEach(line => {
               if (line.startsWith('data: ')) {
                 try {
-                  const data = JSON.parse(line.slice(5));
-                  if (data.type === 'progress') {
-                    results.push(data.result);
-                    setResults([...results]);
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error);
-                  } else if (data.type === 'complete') {
-                    resolve(data.results);
+                    const data = JSON.parse(line.slice(5));
+                    if (data.type === 'progress') {
+                      const result = data.result;
+                      // Only add if not already present
+                      if (!results.some(r => r.url === result.url)) {
+                        results.push(result);
+                        setResults([...results]);
+                      }
+                    } else if (data.type === 'error') {
+                      throw new Error(data.error);
+                    } else if (data.type === 'complete') {
+                      // Update results one final time before resolving
+                      setResults([...results]);
+                      resolve(results);
+                    }
+                  } catch (e) {
+                    console.error('Error parsing SSE data:', e);
                   }
-                } catch (e) {
-                  console.error('Error parsing SSE data:', e);
-                }
               }
             });
           }
@@ -97,10 +103,10 @@ export default function Home() {
       }]);
     },
     onSuccess: (data) => {
-      setResults(data);
+      const completedPages = data.filter(r => r.status === "complete").length;
       toast({
         title: "Crawl Complete",
-        description: `Processed ${data.length} pages successfully`,
+        description: `Processed ${completedPages} pages successfully`,
       });
     },
     onError: (error: Error) => {
