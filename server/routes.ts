@@ -63,21 +63,30 @@ export function registerRoutes(app: Express) {
       const visited = new Set<string>();
       const results: any[] = [];
       let queue = [url];
-      const MAX_PAGES = 20;
+      let detectedPages = 0;
       let processedCount = 0;
+
+      // Initial page scan to determine total pages
+      try {
+        const initialHtml = await fetchPage(url);
+        const initialLinks = extractLinks(initialHtml, url);
+        detectedPages = Math.min(50, initialLinks.length + 1); // Include starting page, cap at 50
+      } catch (error) {
+        detectedPages = 1; // If initial scan fails, just process the main page
+      }
 
       // Send initial status
       res.write(`data: ${JSON.stringify({ 
         type: 'status', 
         processed: processedCount,
-        total: MAX_PAGES,
+        total: detectedPages,
         remaining: queue.length
       })}\n\n`);
 
       const CONCURRENT_REQUESTS = 5;
       
       async function processBatch() {
-        if (queue.length === 0 || visited.size >= MAX_PAGES) return;
+        if (queue.length === 0 || visited.size >= detectedPages) return;
         
         const batch = [];
         while (batch.length < CONCURRENT_REQUESTS && queue.length > 0 && visited.size < MAX_PAGES) {

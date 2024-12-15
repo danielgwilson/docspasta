@@ -197,11 +197,14 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
     return { content: '', isDocPage: false };
   }
 
-  // Check if this looks like a documentation page
+  // Always consider pages with meaningful content as valid
   const isDocPage = Boolean(
-    contentElement.querySelector('pre code') || // Has code blocks
     contentElement.querySelector('h1,h2,h3') || // Has headings
-    /\b(api|function|method|parameter|return|example)\b/i.test(contentElement.textContent || '') // Has common doc terms
+    contentElement.querySelector('article') || // Is an article
+    contentElement.querySelector('main') || // Has main content
+    contentElement.querySelector('section') || // Has sections
+    contentElement.querySelector('p') || // Has paragraphs
+    contentElement.querySelector('pre') // Has formatted content
   );
 
   // Convert to markdown
