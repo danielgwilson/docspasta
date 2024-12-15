@@ -172,12 +172,17 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        <motion.div 
+        <motion.form 
           className="relative"
           animate={{ 
-            y: crawlMutation.isPending ? -100 : 0 
+            y: crawlMutation.isPending ? -80 : 0 
           }}
           transition={{ type: "spring", stiffness: 100 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!url || crawlMutation.isPending) return;
+            crawlMutation.mutate(url);
+          }}
         >
           <div className="relative flex items-center max-w-3xl mx-auto">
             <div className="relative flex-1">
@@ -213,7 +218,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </motion.div>
+        </motion.form>
 
         <AnimatePresence>
           {!crawlMutation.isPending && (
