@@ -58,7 +58,7 @@ export function extractLinks(html: string, baseUrl: string): string[] {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   
-  // Common documentation path patterns
+  // Common documentation path patterns for prioritization
   const docPatterns = [
     '/docs/',
     '/documentation/',
@@ -72,25 +72,11 @@ export function extractLinks(html: string, baseUrl: string): string[] {
     '/quickstart'
   ];
   
-  // First, try to identify the main documentation navigation
-  const possibleNavs = [
-    ...Array.from(doc.querySelectorAll('nav')),
-    ...Array.from(doc.querySelectorAll('[role="navigation"]')),
-    ...Array.from(doc.querySelectorAll('.sidebar')),
-    ...Array.from(doc.querySelectorAll('[class*="sidebar"]')),
-    ...Array.from(doc.querySelectorAll('[class*="nav"]')),
-  ];
+  // Get all links from the page
+  const allLinks = Array.from(doc.querySelectorAll('a[href]'));
   
-  // Extract links from navigation and filter for documentation links
-  const navLinks = possibleNavs.flatMap(nav => 
-    Array.from(nav.querySelectorAll('a[href]'))
-  );
-  
-  // Also get links from the main content area that might be "next" or "previous" links
-  const contentLinks = Array.from(doc.querySelectorAll('main a[href], article a[href], .content a[href]'));
-  
-  // Combine and process all links
-  const links = [...navLinks, ...contentLinks]
+  // Process and filter links
+  const links = allLinks
     .map(a => a.getAttribute('href'))
     .filter((href): href is string => !!href)
     .map(href => {
@@ -109,14 +95,41 @@ export function extractLinks(html: string, baseUrl: string): string[] {
         // Must be same hostname
         if (parsedUrl.hostname !== baseUrlObj.hostname) return false;
         
-        // Check against documentation patterns
-        return docPatterns.some(pattern => 
-          url.toLowerCase().includes(pattern.toLowerCase())
-        );
+        // Exclude common non-content URLs
+        const excludePatterns = [
+          '/cdn-cgi/',
+          '/wp-admin/',
+          '/wp-content/',
+          '/assets/',
+          '/static/',
+          '/login',
+          '/logout',
+          '/signup',
+          '/register',
+          '.jpg',
+          '.jpeg',
+          '.png',
+          '.gif',
+          '.css',
+          '.js'
+        ];
+        
+        if (excludePatterns.some(pattern => url.toLowerCase().includes(pattern))) {
+          return false;
+        }
+        
+        return true;
       } catch {
         return false;
       }
     });
+    
+  // Sort links to prioritize documentation-like paths
+  return Array.from(new Set(links)).sort((a, b) => {
+    const aIsDoc = docPatterns.some(pattern => a.toLowerCase().includes(pattern));
+    const bIsDoc = docPatterns.some(pattern => b.toLowerCase().includes(pattern));
+    return bIsDoc ? 1 : aIsDoc ? -1 : 0;
+  });
 
   return Array.from(new Set(links));
 }

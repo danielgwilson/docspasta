@@ -74,73 +74,82 @@ export function registerRoutes(app: Express) {
         remaining: queue.length
       })}\n\n`);
 
-      while (queue.length > 0 && visited.size < MAX_PAGES) {
-        const currentUrl = queue.shift()!;
-        if (visited.has(currentUrl)) continue;
-        visited.add(currentUrl);
-
-        try {
-          const html = await fetchPage(currentUrl);
-          const title = extractTitle(html);
-          const { content, isDocPage } = extractMainContent(html);
-          
-          if (isDocPage && content) {
-            processedCount++;
-            // Extract and queue new links before adding result
-            const newLinks = extractLinks(html, currentUrl)
-              .filter(link => !visited.has(link) && !queue.includes(link));
+      const CONCURRENT_REQUESTS = 5;
+      
+      async function processBatch() {
+        if (queue.length === 0 || visited.size >= MAX_PAGES) return;
+        
+        const batch = [];
+        while (batch.length < CONCURRENT_REQUESTS && queue.length > 0 && visited.size < MAX_PAGES) {
+          const url = queue.shift()!;
+          if (!visited.has(url)) {
+            visited.add(url);
+            batch.push(url);
+          }
+        }
+        
+        await Promise.all(batch.map(async (currentUrl) => {
+          try {
+            const html = await fetchPage(currentUrl);
+            const title = extractTitle(html);
+            const { content, isDocPage } = extractMainContent(html);
             
-            // Prioritize links that seem more relevant
-            const prioritizedLinks = newLinks.sort((a, b) => {
-              const aScore = a.toLowerCase().includes('/guide/') || a.toLowerCase().includes('/tutorial/') ? 1 : 0;
-              const bScore = b.toLowerCase().includes('/guide/') || b.toLowerCase().includes('/tutorial/') ? 1 : 0;
-              return bScore - aScore;
-            });
-            
-            queue.push(...prioritizedLinks);
-            
+            if (content) {
+              processedCount++;
+              // Extract and queue new links
+              const newLinks = extractLinks(html, currentUrl)
+                .filter(link => !visited.has(link) && !queue.includes(link));
+              
+              queue.push(...newLinks);
+              
+              const result = {
+                url: currentUrl,
+                title,
+                content,
+                status: "complete"
+              };
+              results.push(result);
+              
+              // Send progress update
+              res.write(`data: ${JSON.stringify({ 
+                type: 'progress', 
+                result,
+                status: {
+                  processed: processedCount,
+                  total: MAX_PAGES,
+                  remaining: queue.length
+                }
+              })}\n\n`);
+            } else {
+              const result = {
+                url: currentUrl,
+                title,
+                content: "",
+                status: "error",
+                error: "Empty or invalid content"
+              };
+              results.push(result);
+              res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
+            }
+          } catch (error: any) {
             const result = {
               url: currentUrl,
-              title,
-              content,
-              status: "complete"
-            };
-            results.push(result);
-            
-            // Send progress update
-            res.write(`data: ${JSON.stringify({ 
-              type: 'progress', 
-              result,
-              status: {
-                processed: processedCount,
-                total: MAX_PAGES,
-                remaining: queue.length
-              }
-            })}\n\n`);
-          } else {
-            const result = {
-              url: currentUrl,
-              title,
+              title: currentUrl,
               content: "",
               status: "error",
-              error: "Not a valid documentation page"
+              error: error.message
             };
             results.push(result);
             res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
           }
-        } catch (error: any) {
-          const result = {
-            url: currentUrl,
-            title: currentUrl,
-            content: "",
-            status: "error",
-            error: error.message
-          };
-          results.push(result);
-          res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
+        }));
+        
+        if (queue.length > 0 && visited.size < MAX_PAGES) {
+          await processBatch();
         }
       }
-
+      
+      await processBatch();
       // Send completion message
       res.write(`data: ${JSON.stringify({ type: 'complete', results })}\n\n`);
       res.end();
