@@ -160,27 +160,35 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto space-y-8">
-        <Card>
+        <Card className="border-0 bg-black/5 backdrop-blur-xl">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            <CardTitle className="text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
               DocsPasta
             </CardTitle>
             <SettingsPanel />
           </CardHeader>
           <CardContent className="space-y-4">
-            <form onSubmit={handleSubmit} className="flex gap-4">
+            <form onSubmit={handleSubmit} className="flex gap-2">
               <Input
                 type="url"
-                placeholder="Enter documentation URL..."
+                placeholder="Enter a documentation URL to crawl..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="flex-1"
+                className="flex-1 bg-white/5 border-0 rounded-lg focus-visible:ring-1 h-12 px-4 text-lg"
               />
               <Button 
                 type="submit" 
                 disabled={crawlMutation.isPending}
+                className="h-12 px-8 rounded-lg bg-gradient-to-r from-primary/90 to-primary hover:from-primary hover:to-primary/90 transition-all"
               >
-                {crawlMutation.isPending ? "Crawling..." : "Crawl"}
+                {crawlMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Crawling...
+                  </span>
+                ) : (
+                  "Go"
+                )}
               </Button>
             </form>
 
