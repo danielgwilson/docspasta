@@ -6,6 +6,26 @@ interface QuickActionsProps {
   isLoading: boolean
 }
 
+interface QuickActionProps {
+  title: string
+  url: string
+}
+
+const QUICK_ACTIONS_CONFIG = [
+  {
+    title: "React",
+    url: "https://react.dev/reference/react",
+  },
+  {
+    title: "Next.js",
+    url: "https://nextjs.org/docs",
+  },
+  {
+    title: "Tailwind CSS",
+    url: "https://tailwindcss.com/docs/installation",
+  }
+]
+
 export function QuickActions({ onSelect, isLoading }: QuickActionsProps) {
   if (isLoading) return null;
 
@@ -16,27 +36,20 @@ export function QuickActions({ onSelect, isLoading }: QuickActionsProps) {
       exit={{ opacity: 0, y: 20 }}
       className="flex gap-2 justify-center mt-4"
     >
-      <Button 
-        variant="outline" 
-        className="rounded-full text-sm"
-        onClick={() => onSelect("https://react.dev/reference/react")}
-      >
-        Crawl React documentation →
-      </Button>
-      <Button 
-        variant="outline" 
-        className="rounded-full text-sm"
-        onClick={() => onSelect("https://nextjs.org/docs")}
-      >
-        Extract Next.js API docs →
-      </Button>
-      <Button 
-        variant="outline" 
-        className="rounded-full text-sm"
-        onClick={() => onSelect("https://tailwindcss.com/docs/installation")}
-      >
-        Get Tailwind CSS examples →
-      </Button>
+      {QUICK_ACTIONS_CONFIG.map((action, i) => {
+        return (
+          <Button 
+            key={`quickActionButton-${i}`}
+            onClick={() => onSelect(action.url)}
+            disabled={isLoading}
+            variant="outline"
+            size="sm"
+            className="rounded-md"
+          >
+            {action.title}
+          </Button>
+        )
+      })}
     </motion.div>
   )
 }

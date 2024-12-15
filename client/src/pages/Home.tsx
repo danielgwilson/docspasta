@@ -17,7 +17,7 @@ export default function Home() {
     maxDepth: 3,
     includeCodeBlocks: true,
     excludeNavigation: true,
-    followExternalLinks: false
+    followExternalLinks: false,
   });
   const { toast } = useToast();
 
@@ -25,81 +25,89 @@ export default function Home() {
     mutationFn: async (input: string) => {
       return new Promise<CrawlResult[]>((resolve, reject) => {
         const results: CrawlResult[] = [];
-        
+
         fetch("/api/crawl", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ url: input }),
-        }).then(response => {
-          if (!response.ok) {
-            throw new Error('Network response was not ok');
-          }
-          
-          const reader = response.body?.getReader();
-          if (!reader) throw new Error('No response body');
-          
-          const decoder = new TextDecoder();
-          let buffer = '';
-          
-          function processText(text: string) {
-            const lines = text.split('\n');
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(5));
-                  if (data.type === 'progress') {
-                    const result = data.result;
-                    if (!results.some(r => r.url === result.url)) {
-                      results.push(result);
+        })
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error("Network response was not ok");
+            }
+
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error("No response body");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            function processText(text: string) {
+              const lines = text.split("\n");
+              lines.forEach((line) => {
+                if (line.startsWith("data: ")) {
+                  try {
+                    const data = JSON.parse(line.slice(5));
+                    if (data.type === "progress") {
+                      const result = data.result;
+                      if (!results.some((r) => r.url === result.url)) {
+                        results.push(result);
+                        setResults([...results]);
+                      }
+                    } else if (data.type === "error") {
+                      throw new Error(data.error);
+                    } else if (data.type === "complete") {
                       setResults([...results]);
+                      resolve(results);
                     }
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error);
-                  } else if (data.type === 'complete') {
-                    setResults([...results]);
-                    resolve(results);
+                  } catch (e) {
+                    console.error("Error parsing SSE data:", e);
                   }
-                } catch (e) {
-                  console.error('Error parsing SSE data:', e);
                 }
+              });
+            }
+
+            async function pump(): Promise<void> {
+              if (!reader) {
+                return Promise.reject(new Error("No response body"));
               }
-            });
-          }
-          
-          function pump(): Promise<void> {
-            return reader.read().then(({done, value}) => {
+
+              const { done, value } = await reader.read();
+
               if (done) {
                 if (buffer.length > 0) processText(buffer);
                 resolve(results);
                 return;
               }
-              
-              const text = decoder.decode(value, {stream: true});
+
+              const text = decoder.decode(value, { stream: true });
               buffer += text;
-              const lines = buffer.split('\n\n');
-              buffer = lines.pop() || '';
-              lines.forEach(line => processText(line));
-              
+              const lines = buffer.split("\n\n");
+              buffer = lines.pop() || "";
+              lines.forEach((line) => processText(line));
+
               return pump();
-            });
-          }
-          
-          pump().catch(reject);
-        }).catch(reject);
+            }
+
+            pump().catch(reject);
+          })
+          .catch(reject);
       });
     },
     onMutate: (input) => {
-      setResults([{
-        url: input,
-        title: "Processing...",
-        content: "",
-        status: "processing"
-      }]);
+      setResults([
+        {
+          url: input,
+          title: "Processing...",
+          content: "",
+          status: "processing",
+        },
+      ]);
     },
     onSuccess: (data) => {
-      const completedPages = data.filter(r => r.status === "complete").length;
+      const completedPages = data.filter((r) => r.status === "complete").length;
       toast({
         title: "Crawl Complete",
         description: `Processed ${completedPages} pages successfully`,
@@ -118,7 +126,7 @@ export default function Home() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) return;
-    
+
     crawlMutation.mutate(url);
   };
 
@@ -144,7 +152,7 @@ export default function Home() {
   // Debounced URL preview
   useEffect(() => {
     if (!url) return;
-    
+
     const timeoutId = setTimeout(() => {
       previewMutation.mutate(url);
     }, 500);
@@ -153,30 +161,38 @@ export default function Home() {
   }, [url]);
 
   return (
-    <div className="min-h-screen bg-background p-4">
+    <div className="min-h-screen bg-background p-2">
       <div className="max-w-5xl mx-auto space-y-8">
-        <AnimatePresence mode="wait">
-          {!crawlMutation.isPending && (
-            <motion.h1
-              key="title"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="text-5xl font-bold tracking-tight text-center pt-12"
-            >
-              What docs should I crawl for you?
-            </motion.h1>
-          )}
-        </AnimatePresence>
+        <div className="flex flex-col gap-4">
+          <AnimatePresence mode="wait">
+            {!crawlMutation.isPending && (
+              <motion.h1
+                key="title"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="text-5xl font-bold tracking-tight text-center pt-12"
+              >
+                What docs should I crawl for you?
+              </motion.h1>
+            )}
+          </AnimatePresence>
 
-        <URLInput
-          url={url}
-          isLoading={crawlMutation.isPending}
-          onUrlChange={setUrl}
-          onSubmit={() => crawlMutation.mutate(url)}
-          settings={settings}
-          onSettingsChange={setSettings}
-        />
+          <URLInput
+            url={url}
+            isLoading={crawlMutation.isPending}
+            onUrlChange={setUrl}
+            onSubmit={() => crawlMutation.mutate(url)}
+            settings={settings}
+            onSettingsChange={(newSettings) => {
+              if (newSettings) {
+                setSettings(newSettings);
+              }
+
+              return settings;
+            }}
+          />
+        </div>
 
         <QuickActions
           isLoading={crawlMutation.isPending}
@@ -190,9 +206,7 @@ export default function Home() {
           <Card className="border-dashed">
             <CardContent className="pt-6">
               <div className="space-y-2">
-                <h3 className="font-medium">
-                  {previewMutation.data.title}
-                </h3>
+                <h3 className="font-medium">{previewMutation.data.title}</h3>
                 <p className="text-sm text-muted-foreground">
                   {previewMutation.data.description}
                 </p>
@@ -201,9 +215,7 @@ export default function Home() {
           </Card>
         )}
 
-        {crawlMutation.isPending && (
-          <CrawlProgress results={results} />
-        )}
+        {crawlMutation.isPending && <CrawlProgress results={results} />}
 
         {results.length > 0 && (
           <>
