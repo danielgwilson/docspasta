@@ -47,8 +47,12 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Crawl documentation pages
+  // Crawl documentation pages with progress updates
   app.post("/api/crawl", async (req, res) => {
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
     try {
       const { url } = req.body;
       if (!url) {
@@ -87,12 +91,16 @@ export function registerRoutes(app: Express) {
             
             queue.push(...prioritizedLinks);
             
-            results.push({
+            const result = {
               url: currentUrl,
               title,
               content,
               status: "complete"
-            });
+            };
+            results.push(result);
+            
+            // Send progress update
+            res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
           } else {
             results.push({
               url: currentUrl,

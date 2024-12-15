@@ -152,15 +152,33 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
     doc.querySelector('[class*="content"]') ||
     doc.querySelector('[class*="docs"]');
     
-  // Remove non-content elements before processing
-  ['nav', 'header', 'footer', '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer'].forEach(selector => {
-    doc.querySelectorAll(selector).forEach(el => el.remove());
-  });
-
   let contentElement = mainContent;
   if (!contentElement) {
     contentElement = doc.querySelector('body');
   }
+  
+  if (!contentElement) {
+    return { content: '', isDocPage: false };
+  }
+
+  // Remove non-content elements before processing
+  [
+    'nav', 'header', 'footer', 
+    '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer',
+    'style', 'script', 'noscript', // Remove styles and scripts
+    '[role="navigation"]', '[role="complementary"]', // Remove ARIA-marked navigation
+    '.table-of-contents', '.toc', // Common table of contents
+    '.breadcrumbs', '.breadcrumb', // Navigation breadcrumbs
+    '[class*="menu"]', '[class*="nav"]', // Any menu or navigation classes
+  ].forEach(selector => {
+    contentElement.querySelectorAll(selector).forEach(el => el.remove());
+  });
+
+  // Remove style attributes and CSS variables
+  contentElement.querySelectorAll('*').forEach(el => {
+    el.removeAttribute('style');
+    el.removeAttribute('class');
+  });
   
   if (!contentElement) {
     return { content: '', isDocPage: false };

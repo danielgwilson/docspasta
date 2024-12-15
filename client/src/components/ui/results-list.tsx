@@ -7,6 +7,12 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { CrawlResult } from "@/pages/Home";
 import { Copy, CheckCircle, XCircle, Loader2 } from "lucide-react";
@@ -154,11 +160,20 @@ End of Documentation
 
                   {result.status === "complete" && (
                     <div className="mt-4">
-                      <pre className="text-sm bg-muted p-4 rounded-md overflow-x-auto">
-                        <code>
-                          {result.content.slice(0, 200)}...
-                        </code>
-                      </pre>
+                      <Accordion type="single" collapsible>
+                        <AccordionItem value="content">
+                          <AccordionTrigger>
+                            Preview Content
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <ScrollArea className="h-[400px]">
+                              <pre className="text-sm bg-muted p-4 rounded-md overflow-x-auto whitespace-pre-wrap">
+                                <code>{result.content}</code>
+                              </pre>
+                            </ScrollArea>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
                     </div>
                   )}
                 </CardContent>

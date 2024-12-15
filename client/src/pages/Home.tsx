@@ -25,24 +25,64 @@ export default function Home() {
 
   const crawlMutation = useMutation({
     mutationFn: async (input: string) => {
-      const apiKey = localStorage.getItem("openai_api_key");
-      if (!apiKey) {
-        throw new Error("Please set your OpenAI API key in settings first");
-      }
-
-      const response = await fetch("/api/crawl", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: input, apiKey }),
+      return new Promise((resolve, reject) => {
+        const results: CrawlResult[] = [];
+        
+        fetch("/api/crawl", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ url: input }),
+        }).then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error('No response body');
+          
+          const decoder = new TextDecoder();
+          let buffer = '';
+          
+          function processText(text: string) {
+            const lines = text.split('\n');
+            lines.forEach(line => {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(5));
+                  if (data.type === 'progress') {
+                    results.push(data.result);
+                    setResults([...results]); // Update UI with progress
+                  }
+                } catch (e) {
+                  console.error('Error parsing SSE data:', e);
+                }
+              }
+            });
+          }
+          
+          function pump(): Promise<void> {
+            return reader.read().then(({done, value}) => {
+              if (done) {
+                if (buffer.length > 0) processText(buffer);
+                resolve(results);
+                return;
+              }
+              
+              const text = decoder.decode(value, {stream: true});
+              buffer += text;
+              const lines = buffer.split('\n\n');
+              buffer = lines.pop() || '';
+              lines.forEach(line => processText(line));
+              
+              return pump();
+            });
+          }
+          
+          pump().catch(reject);
+        }).catch(reject);
       });
-
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      return response.json();
     },
     onMutate: (input) => {
       setResults([{
