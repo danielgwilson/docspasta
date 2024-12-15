@@ -17,8 +17,28 @@ export async function processDocPage(content: string, apiKey: string): Promise<{
       messages: [
         {
           role: "system",
-          content: 
-            "You are a documentation processing expert. Analyze the provided HTML content and determine if it's a programming documentation page. If it is, extract and format the content in clean markdown. Return JSON in this format: { 'isValid': boolean, 'content': string, 'reason': string }"
+          content: `You are a documentation processing expert specializing in programming documentation. Your task is to:
+1. Analyze if the provided HTML content is a programming documentation page
+2. If valid, extract and format the content maintaining:
+   - Code blocks with proper syntax highlighting
+   - Section hierarchy and structure
+   - Important callouts and notes
+   - Method signatures and parameters
+   - Examples and their explanations
+3. Remove any navigation elements, headers, footers, or sidebars
+4. Preserve only the main documentation content
+
+Return JSON in this format:
+{
+  "isValid": boolean,
+  "content": string, // Clean markdown with preserved formatting
+  "reason": string,  // Explanation of why this is/isn't valid documentation
+  "metadata": {
+    "type": string,  // e.g. "api", "guide", "reference", "tutorial"
+    "language": string, // Programming language if detected
+    "framework": string // Framework/library if detected
+  }
+}`
         },
         {
           role: "user",

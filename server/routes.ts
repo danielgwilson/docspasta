@@ -68,22 +68,33 @@ export function registerRoutes(app: Express) {
         try {
           const html = await fetchPage(currentUrl);
           const title = extractTitle(html);
+          const mainContent = extractMainContent(html);
           
           // Process with OpenAI
-          const processed = await processDocPage(html, apiKey);
+          const processed = await processDocPage(mainContent, apiKey);
           
           if (processed.isValid && processed.content) {
+            // Extract and queue new links before adding result
+            // This ensures better breadth-first crawling
+            const newLinks = extractLinks(html, currentUrl)
+              .filter(link => !visited.has(link) && !queue.includes(link));
+            
+            // Prioritize links that seem more relevant
+            const prioritizedLinks = newLinks.sort((a, b) => {
+              const aScore = a.toLowerCase().includes('/guide/') || a.toLowerCase().includes('/tutorial/') ? 1 : 0;
+              const bScore = b.toLowerCase().includes('/guide/') || b.toLowerCase().includes('/tutorial/') ? 1 : 0;
+              return bScore - aScore;
+            });
+            
+            queue.push(...prioritizedLinks);
+            
             results.push({
               url: currentUrl,
               title,
               content: processed.content,
-              status: "complete"
+              status: "complete",
+              metadata: processed.metadata
             });
-
-            // Extract and queue new links
-            const newLinks = extractLinks(html, currentUrl)
-              .filter(link => !visited.has(link));
-            queue.push(...newLinks);
           } else {
             results.push({
               url: currentUrl,
