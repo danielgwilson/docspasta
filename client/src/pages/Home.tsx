@@ -175,7 +175,9 @@ export default function Home() {
         <motion.form 
           className="relative"
           animate={{ 
-            y: crawlMutation.isPending ? -80 : 0 
+            y: crawlMutation.isPending ? -80 : 0,
+            scale: 1,
+            opacity: 1
           }}
           transition={{ type: "spring", stiffness: 100 }}
           onSubmit={(e) => {
@@ -194,11 +196,18 @@ export default function Home() {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 className="pl-12 pr-[140px] h-14 text-lg rounded-2xl border-2 hover:border-primary/50 transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!url || crawlMutation.isPending) return;
+                    crawlMutation.mutate(url);
+                  }
+                }}
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                 <SettingsPanel />
                 <Button 
-                  onClick={handleSubmit}
+                  type="submit"
                   disabled={!url || crawlMutation.isPending}
                   size="sm"
                   className="rounded-xl"
