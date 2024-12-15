@@ -50,15 +50,16 @@ export function registerRoutes(app: Express) {
   // Crawl documentation pages
   app.post("/api/crawl", async (req, res) => {
     try {
-      const { url, apiKey } = req.body;
-      if (!url || !apiKey) {
-        return res.status(400).json({ error: "URL and API key are required" });
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ error: "URL is required" });
       }
 
       const visited = new Set<string>();
       const results: any[] = [];
       let queue = [url];
       const MAX_PAGES = 20;
+      let processedCount = 0;
 
       while (queue.length > 0 && visited.size < MAX_PAGES) {
         const currentUrl = queue.shift()!;
@@ -68,12 +69,10 @@ export function registerRoutes(app: Express) {
         try {
           const html = await fetchPage(currentUrl);
           const title = extractTitle(html);
-          const mainContent = extractMainContent(html);
+          const { content, isDocPage } = extractMainContent(html);
           
-          // Process with OpenAI
-          const processed = await processDocPage(mainContent, apiKey);
-          
-          if (processed.isValid && processed.content) {
+          if (isDocPage && content) {
+            processedCount++;
             // Extract and queue new links before adding result
             // This ensures better breadth-first crawling
             const newLinks = extractLinks(html, currentUrl)
@@ -91,9 +90,8 @@ export function registerRoutes(app: Express) {
             results.push({
               url: currentUrl,
               title,
-              content: processed.content,
-              status: "complete",
-              metadata: processed.metadata
+              content,
+              status: "complete"
             });
           } else {
             results.push({

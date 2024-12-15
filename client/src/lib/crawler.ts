@@ -1,4 +1,20 @@
 import { JSDOM } from 'jsdom';
+import TurndownService from 'turndown';
+
+// Initialize Turndown for HTML to Markdown conversion
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced'
+});
+
+// Configure Turndown to handle code blocks better
+turndownService.addRule('fencedCodeBlock', {
+  filter: ['pre', 'code'],
+  replacement: function(content, node) {
+    const language = node.getAttribute('class')?.replace('language-', '') || '';
+    return `\n\`\`\`${language}\n${content}\n\`\`\`\n`;
+  }
+});
 
 // Rate limiting utilities
 const RATE_LIMIT = 1000; // 1 request per second
@@ -122,7 +138,7 @@ export function extractTitle(html: string): string {
   return title;
 }
 
-export function extractMainContent(html: string): string {
+export function extractMainContent(html: string): { content: string, isDocPage: boolean } {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   
@@ -136,19 +152,32 @@ export function extractMainContent(html: string): string {
     doc.querySelector('[class*="content"]') ||
     doc.querySelector('[class*="docs"]');
     
-  if (!mainContent) {
-    // If we can't find a clear main content area, return the body content
-    // but try to remove obvious navigation, header, and footer elements
-    const body = doc.querySelector('body');
-    if (!body) return html;
-    
-    // Remove typical non-content elements
-    ['nav', 'header', 'footer', '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer'].forEach(selector => {
-      body.querySelectorAll(selector).forEach(el => el.remove());
-    });
-    
-    return body.innerHTML;
+  // Remove non-content elements before processing
+  ['nav', 'header', 'footer', '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer'].forEach(selector => {
+    doc.querySelectorAll(selector).forEach(el => el.remove());
+  });
+
+  let contentElement = mainContent;
+  if (!contentElement) {
+    contentElement = doc.querySelector('body');
   }
   
-  return mainContent.innerHTML;
+  if (!contentElement) {
+    return { content: '', isDocPage: false };
+  }
+
+  // Check if this looks like a documentation page
+  const isDocPage = Boolean(
+    contentElement.querySelector('pre code') || // Has code blocks
+    contentElement.querySelector('h1,h2,h3') || // Has headings
+    /\b(api|function|method|parameter|return|example)\b/i.test(contentElement.textContent || '') // Has common doc terms
+  );
+
+  // Convert to markdown
+  const markdown = turndownService.turndown(contentElement.innerHTML);
+  
+  return {
+    content: markdown,
+    isDocPage
+  };
 }
