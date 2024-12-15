@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer } from "http";
 import { processDocPage } from "../client/src/lib/openai";
-import { fetchPage, extractLinks, extractTitle } from "../client/src/lib/crawler";
+import { fetchPage, extractLinks, extractTitle, extractMainContent } from "../client/src/lib/crawler";
 import { JSDOM } from 'jsdom';
 
 export function registerRoutes(app: Express) {
