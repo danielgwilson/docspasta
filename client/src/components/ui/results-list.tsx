@@ -41,10 +41,21 @@ export default function ResultsList({ results }: ResultsListProps) {
   const handleCopyAll = async () => {
     try {
       setCopying("all");
-      const allContent = results
-        .filter(r => r.status === "complete")
-        .map(r => `# ${r.title}\n\n${r.content}`)
-        .join("\n\n---\n\n");
+      const allContent = `================================================================
+Documentation Collection
+================================================================
+Total Pages: ${results.filter(r => r.status === "complete").length}
+Timestamp: ${new Date().toISOString()}
+Source: docspasta crawler
+
+${results
+  .filter(r => r.status === "complete")
+  .map(r => r.content)
+  .join("\n\n")}
+
+================================================================
+End of Documentation
+================================================================`;
       await navigator.clipboard.writeText(allContent);
       toast({
         title: "Copied All",

@@ -176,8 +176,25 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   // Convert to markdown
   const markdown = turndownService.turndown(contentElement.innerHTML);
   
+  // Format content in a structured way
+  const formattedContent = `================================================================
+Documentation Page
+================================================================
+Title: ${extractTitle(html)}
+URL: ${contentElement.baseURI || 'Unknown'}
+Type: Documentation
+Format: Markdown
+
+================================================================
+Content
+================================================================
+
+${markdown}
+
+================================================================`;
+  
   return {
-    content: markdown,
+    content: formattedContent,
     isDocPage
   };
 }
