@@ -66,20 +66,24 @@ export function registerRoutes(app: Express) {
       let detectedPages = 0;
       let processedCount = 0;
 
-      // Initial page scan to determine total pages
+      let totalPages = 1; // Start with at least the initial page
+
+      // Initial page scan to determine potential total pages
       try {
         const initialHtml = await fetchPage(url);
-        const initialLinks = extractLinks(initialHtml, url);
-        detectedPages = Math.min(50, initialLinks.length + 1); // Include starting page, cap at 50
+        const initialLinks = new Set(extractLinks(initialHtml, url));
+        // Set a reasonable maximum based on initial link count
+        totalPages = Math.min(20, initialLinks.size + 1);
       } catch (error) {
-        detectedPages = 1; // If initial scan fails, just process the main page
+        // If initial scan fails, we'll just process the main page
+        totalPages = 1;
       }
 
       // Send initial status
       res.write(`data: ${JSON.stringify({ 
         type: 'status', 
         processed: processedCount,
-        total: detectedPages,
+        total: totalPages,
         remaining: queue.length
       })}\n\n`);
 

@@ -215,12 +215,13 @@ export default function Home() {
               <div className="space-y-2">
                 <Progress 
                   value={results.filter(r => r.status === "complete").length} 
-                  max={results.length || 1} 
+                  max={Math.max(results.length, results.filter(r => r.status === "complete").length + 1)} 
                   className="w-full"
                 />
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>
-                    Processed: {results.filter(r => r.status === "complete").length} / {results.length} pages
+                    Processed: {results.filter(r => r.status === "complete").length} pages 
+                    {results.some(r => r.status === "processing") && " (scanning for more...)"}
                   </span>
                   {results.length > 0 && (
                     <span>

@@ -81,7 +81,11 @@ export function extractLinks(html: string, baseUrl: string): string[] {
     .filter((href): href is string => !!href)
     .map(href => {
       try {
-        return new URL(href, baseUrl).toString();
+        const url = new URL(href, baseUrl);
+        // Normalize URL by removing hash and query parameters
+        url.hash = '';
+        url.search = '';
+        return url.toString();
       } catch {
         return null;
       }
