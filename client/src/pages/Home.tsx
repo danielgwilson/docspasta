@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress"; 
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import SettingsPanel from "@/components/ui/settings-panel";
 import ResultsList from "@/components/ui/results-list";
 import CrawlSummary from "@/components/ui/crawl-summary";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Link2, Loader2 } from "lucide-react";
 
 export type CrawlResult = {
   url: string;
@@ -26,7 +26,7 @@ export default function Home() {
 
   const crawlMutation = useMutation({
     mutationFn: async (input: string) => {
-      return new Promise((resolve, reject) => {
+      return new Promise<CrawlResult[]>((resolve, reject) => {
         const results: CrawlResult[] = [];
         
         fetch("/api/crawl", {
@@ -51,24 +51,22 @@ export default function Home() {
             lines.forEach(line => {
               if (line.startsWith('data: ')) {
                 try {
-                    const data = JSON.parse(line.slice(5));
-                    if (data.type === 'progress') {
-                      const result = data.result;
-                      // Only add if not already present
-                      if (!results.some(r => r.url === result.url)) {
-                        results.push(result);
-                        setResults([...results]);
-                      }
-                    } else if (data.type === 'error') {
-                      throw new Error(data.error);
-                    } else if (data.type === 'complete') {
-                      // Update results one final time before resolving
+                  const data = JSON.parse(line.slice(5));
+                  if (data.type === 'progress') {
+                    const result = data.result;
+                    if (!results.some(r => r.url === result.url)) {
+                      results.push(result);
                       setResults([...results]);
-                      resolve(results);
                     }
-                  } catch (e) {
-                    console.error('Error parsing SSE data:', e);
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error);
+                  } else if (data.type === 'complete') {
+                    setResults([...results]);
+                    resolve(results);
                   }
+                } catch (e) {
+                  console.error('Error parsing SSE data:', e);
+                }
               }
             });
           }
@@ -158,65 +156,75 @@ export default function Home() {
   }, [url]);
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <Card className="border-0 bg-black/5 backdrop-blur-xl">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              DocsPasta
-            </CardTitle>
-            <SettingsPanel />
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form onSubmit={handleSubmit} className="flex gap-2">
+    <div className="min-h-screen bg-background p-6">
+      <div className="max-w-5xl mx-auto space-y-12">
+        <h1 className="text-5xl font-bold tracking-tight text-center">
+          What docs should I crawl for you?
+        </h1>
+
+        <div className="relative">
+          <div className="relative flex items-center max-w-3xl mx-auto">
+            <div className="relative flex-1">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <Link2 className="w-5 h-5 text-muted-foreground" />
+              </div>
               <Input
-                type="url"
-                placeholder="Enter a documentation URL to crawl..."
+                placeholder="Enter documentation URL (e.g. https://docs.example.com)"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="flex-1 bg-white/5 border-0 rounded-lg focus-visible:ring-1 h-12 px-4 text-lg"
+                className="pl-12 pr-[140px] h-14 text-lg rounded-2xl border-2 hover:border-primary/50 transition-colors"
               />
-              <Button 
-                type="submit" 
-                disabled={crawlMutation.isPending}
-                className="h-12 px-8 rounded-lg bg-gradient-to-r from-primary/90 to-primary hover:from-primary hover:to-primary/90 transition-all"
-              >
-                {crawlMutation.isPending ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Crawling...
-                  </span>
-                ) : (
-                  "Go"
-                )}
-              </Button>
-            </form>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <SettingsPanel />
+                <Button 
+                  onClick={handleSubmit}
+                  disabled={!url || crawlMutation.isPending}
+                  size="sm"
+                  className="rounded-xl"
+                >
+                  {crawlMutation.isPending ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Crawling...
+                    </span>
+                  ) : (
+                    <>
+                      Crawl
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
 
-            {url && !crawlMutation.isPending && (
-              <Card className="border-dashed">
-                <CardContent className="pt-6">
-                  {previewMutation.isPending ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-2/3" />
-                      <Skeleton className="h-4 w-full" />
-                    </div>
-                  ) : previewMutation.isError ? (
-                    <p className="text-sm text-muted-foreground">
-                      Enter a valid documentation URL to see a preview
-                    </p>
-                  ) : previewMutation.data ? (
-                    <div className="space-y-2">
-                      <h3 className="font-medium">{previewMutation.data.title}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {previewMutation.data.description}
-                      </p>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex gap-2 justify-center">
+          <Button variant="outline" className="rounded-full text-sm">
+            Crawl React documentation →
+          </Button>
+          <Button variant="outline" className="rounded-full text-sm">
+            Extract Next.js API docs →
+          </Button>
+          <Button variant="outline" className="rounded-full text-sm">
+            Get Tailwind CSS examples →
+          </Button>
+        </div>
+
+        {url && !crawlMutation.isPending && previewMutation.data && (
+          <Card className="border-dashed">
+            <CardContent className="pt-6">
+              <div className="space-y-2">
+                <h3 className="font-medium">
+                  {previewMutation.data.title}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {previewMutation.data.description}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {crawlMutation.isPending && (
           <Card>
