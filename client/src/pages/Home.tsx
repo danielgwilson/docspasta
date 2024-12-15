@@ -157,8 +157,8 @@ export default function Home() {
   }, [url]);
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-5xl mx-auto space-y-12">
+    <div className="min-h-screen bg-background p-4">
+      <div className="max-w-5xl mx-auto space-y-8">
         <AnimatePresence>
           {!crawlMutation.isPending && (
             <motion.h1
@@ -175,9 +175,13 @@ export default function Home() {
         <motion.form 
           className="relative"
           animate={{ 
-            y: crawlMutation.isPending ? -80 : 0
+            y: crawlMutation.isPending ? 20 : 0 
           }}
-          transition={{ type: "spring", stiffness: 100 }}
+          transition={{ type: "spring", stiffness: 100, damping: 20 }}
+          style={{ 
+            position: 'relative',
+            zIndex: 50
+          }}
           onSubmit={(e) => {
             e.preventDefault();
             if (!url || crawlMutation.isPending) return;
