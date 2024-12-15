@@ -159,9 +159,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-5xl mx-auto space-y-8">
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {!crawlMutation.isPending && (
             <motion.h1
+              key="title"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
@@ -197,7 +198,7 @@ export default function Home() {
                 placeholder="Enter documentation URL (e.g. https://docs.example.com)"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                className="pl-12 pr-[140px] h-14 text-lg rounded-2xl border-2 hover:border-primary/50 transition-colors"
+                className="pl-12 pr-[160px] h-14 text-lg rounded-2xl border-2 hover:border-primary/50 transition-colors"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
