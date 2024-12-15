@@ -11,6 +11,7 @@ import SettingsPanel from "@/components/ui/settings-panel";
 import ResultsList from "@/components/ui/results-list";
 import CrawlSummary from "@/components/ui/crawl-summary";
 import { ArrowRight, Link2, Loader2, FileText, Hash, Link as LinkIcon } from "lucide-react";
+import { encode } from "gpt-tokenizer";
 
 export type CrawlResult = {
   url: string;
@@ -316,35 +317,43 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-3 gap-4 pt-2">
+                  <div className="grid grid-cols-3 gap-2 pt-4 border-t">
                     <motion.div 
-                      className="space-y-1"
+                      className="space-y-0.5"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: 0.1 }}
                     >
-                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
                         <Hash className="w-3 h-3" />
                         Tokens
                       </div>
-                      <p className="text-lg font-semibold">
+                      <motion.p 
+                        className="text-base font-medium"
+                        initial={{ color: "hsl(var(--primary))" }}
+                        animate={{ color: "hsl(var(--foreground))" }}
+                        transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+                      >
                         {Intl.NumberFormat('en-US', { notation: 'compact' }).format(
-                          results.reduce((sum, r) => sum + (encode(r.content).length || 0), 0)
+                          results.reduce((sum, r) => sum + encode(r.content).length, 0)
                         )}
-                      </p>
+                      </motion.p>
+                      <div className="text-[10px] text-muted-foreground">
+                        (~{Math.round(results.reduce((sum, r) => sum + encode(r.content).length, 0) * 0.0004 * 100) / 100}¢)
+                      </div>
                     </motion.div>
                     
                     <motion.div 
-                      className="space-y-1"
+                      className="space-y-0.5"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: 0.2 }}
                     >
-                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
                         <FileText className="w-3 h-3" />
                         Words
                       </div>
-                      <p className="text-lg font-semibold">
+                      <p className="text-sm">
                         {Intl.NumberFormat('en-US', { notation: 'compact' }).format(
                           results.reduce((sum, r) => sum + r.content.split(/\s+/).length, 0)
                         )}
@@ -352,16 +361,16 @@ export default function Home() {
                     </motion.div>
                     
                     <motion.div 
-                      className="space-y-1"
+                      className="space-y-0.5"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: 0.3 }}
                     >
-                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
                         <LinkIcon className="w-3 h-3" />
                         Pages
                       </div>
-                      <p className="text-lg font-semibold">
+                      <p className="text-sm">
                         {results.filter(r => r.status === "complete").length}
                       </p>
                     </motion.div>
