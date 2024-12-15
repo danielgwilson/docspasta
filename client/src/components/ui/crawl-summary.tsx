@@ -1,17 +1,22 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CrawlResult } from "@/pages/Home";
-import { FileText, CheckCircle, XCircle, Link as LinkIcon } from "lucide-react";
+import { FileText, CheckCircle, XCircle, Link as LinkIcon, Hash } from "lucide-react";
+import { encode } from "gpt-tokenizer";
 
 interface CrawlSummaryProps {
   results: CrawlResult[];
 }
 
 export default function CrawlSummary({ results }: CrawlSummaryProps) {
-  const completedPages = results.filter(r => r.status === "complete").length;
+  const completedResults = results.filter(r => r.status === "complete");
+  const completedPages = completedResults.length;
   const errorPages = results.filter(r => r.status === "error").length;
-  const totalWordCount = results
-    .filter(r => r.status === "complete")
+  
+  const totalWordCount = completedResults
     .reduce((sum, r) => sum + r.content.split(/\s+/).length, 0);
+    
+  const totalTokenCount = completedResults
+    .reduce((sum, r) => sum + encode(r.content).length, 0);
   
   const uniqueDomains = new Set(
     results.map(r => {
@@ -47,10 +52,13 @@ export default function CrawlSummary({ results }: CrawlSummaryProps) {
           <div className="space-y-1">
             <div className="flex items-center text-sm text-muted-foreground">
               <FileText className="h-4 w-4 mr-1" />
-              Words
+              Words / Tokens
             </div>
             <p className="text-2xl font-bold">
               {Intl.NumberFormat('en-US', { notation: 'compact' }).format(totalWordCount)}
+              <span className="text-sm text-muted-foreground ml-1">
+                (~{Intl.NumberFormat('en-US', { notation: 'compact' }).format(totalTokenCount)} tokens)
+              </span>
             </p>
           </div>
           <div className="space-y-1">

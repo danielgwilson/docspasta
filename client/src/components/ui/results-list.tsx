@@ -98,37 +98,36 @@ End of Documentation
         <ScrollArea className="h-[500px] pr-4">
           <div className="space-y-4">
             {results.map((result) => (
-              <Card key={result.url}>
-                <CardContent className="py-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium truncate">
-                        {result.title}
-                      </h3>
-                      <a 
-                        href={result.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-muted-foreground hover:underline block truncate"
-                      >
-                        {result.url}
-                      </a>
+              <Card key={result.url} className="relative overflow-hidden">
+                <CardContent className="py-2 px-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0 pr-20">
+                      <div className="flex items-baseline gap-2">
+                        <h3 className="font-medium truncate text-sm">
+                          {result.title}
+                        </h3>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {result.url}
+                        </span>
+                      </div>
                     </div>
-                    {result.status === "complete" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleCopy(result.content, result.url)}
-                        disabled={copying !== null}
-                      >
-                        {copying === result.url ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <Copy className="h-4 w-4 mr-2" />
-                        )}
-                        Copy
-                      </Button>
-                    )}
+                    <div className="absolute right-2 top-1.5">
+                      {result.status === "complete" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          onClick={() => handleCopy(result.content, result.url)}
+                          disabled={copying !== null}
+                        >
+                          {copying === result.url ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="mt-2 flex items-center gap-2">
