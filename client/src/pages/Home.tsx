@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import SettingsPanel from "@/components/ui/settings-panel";
 import ResultsList from "@/components/ui/results-list";
+import CrawlSummary from "@/components/ui/crawl-summary";
 import { ArrowRight } from "lucide-react";
 
 export type CrawlResult = {
@@ -235,7 +236,10 @@ export default function Home() {
         )}
 
         {results.length > 0 && (
-          <ResultsList results={results} />
+          <>
+            <CrawlSummary results={results} />
+            <ResultsList results={results} />
+          </>
         )}
       </div>
     </div>

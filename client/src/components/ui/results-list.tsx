@@ -99,17 +99,17 @@ End of Documentation
           <div className="space-y-4">
             {results.map((result) => (
               <Card key={result.url}>
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <h3 className="font-medium">
+                <CardContent className="py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium truncate">
                         {result.title}
                       </h3>
                       <a 
                         href={result.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm text-muted-foreground hover:underline"
+                        className="text-sm text-muted-foreground hover:underline block truncate"
                       >
                         {result.url}
                       </a>
