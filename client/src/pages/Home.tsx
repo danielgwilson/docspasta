@@ -53,7 +53,11 @@ export default function Home() {
                   const data = JSON.parse(line.slice(5));
                   if (data.type === 'progress') {
                     results.push(data.result);
-                    setResults([...results]); // Update UI with progress
+                    setResults([...results]);
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error);
+                  } else if (data.type === 'complete') {
+                    resolve(data.results);
                   }
                 } catch (e) {
                   console.error('Error parsing SSE data:', e);
@@ -202,10 +206,23 @@ export default function Home() {
         {crawlMutation.isPending && (
           <Card>
             <CardContent className="pt-6">
-              <Progress value={undefined} className="w-full" />
-              <p className="text-sm text-muted-foreground mt-2">
-                Crawling documentation pages...
-              </p>
+              <div className="space-y-2">
+                <Progress 
+                  value={results.filter(r => r.status === "complete").length} 
+                  max={20} 
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>
+                    Processed: {results.filter(r => r.status === "complete").length} / 20 pages
+                  </span>
+                  {results.length > 0 && (
+                    <span>
+                      Currently processing: {results[results.length - 1].title}
+                    </span>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}

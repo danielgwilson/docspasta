@@ -49,21 +49,30 @@ export function registerRoutes(app: Express) {
 
   // Crawl documentation pages with progress updates
   app.post("/api/crawl", async (req, res) => {
-    // Set headers for SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
     try {
       const { url } = req.body;
       if (!url) {
         return res.status(400).json({ error: "URL is required" });
       }
 
+      // Set headers for SSE
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
       const visited = new Set<string>();
       const results: any[] = [];
       let queue = [url];
       const MAX_PAGES = 20;
       let processedCount = 0;
+
+      // Send initial status
+      res.write(`data: ${JSON.stringify({ 
+        type: 'status', 
+        processed: processedCount,
+        total: MAX_PAGES,
+        remaining: queue.length
+      })}\n\n`);
 
       while (queue.length > 0 && visited.size < MAX_PAGES) {
         const currentUrl = queue.shift()!;
@@ -78,7 +87,6 @@ export function registerRoutes(app: Express) {
           if (isDocPage && content) {
             processedCount++;
             // Extract and queue new links before adding result
-            // This ensures better breadth-first crawling
             const newLinks = extractLinks(html, currentUrl)
               .filter(link => !visited.has(link) && !queue.includes(link));
             
@@ -100,30 +108,52 @@ export function registerRoutes(app: Express) {
             results.push(result);
             
             // Send progress update
-            res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
+            res.write(`data: ${JSON.stringify({ 
+              type: 'progress', 
+              result,
+              status: {
+                processed: processedCount,
+                total: MAX_PAGES,
+                remaining: queue.length
+              }
+            })}\n\n`);
           } else {
-            results.push({
+            const result = {
               url: currentUrl,
               title,
               content: "",
               status: "error",
-              error: processed.error || "Not a valid documentation page"
-            });
+              error: "Not a valid documentation page"
+            };
+            results.push(result);
+            res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
           }
         } catch (error: any) {
-          results.push({
+          const result = {
             url: currentUrl,
             title: currentUrl,
             content: "",
             status: "error",
             error: error.message
-          });
+          };
+          results.push(result);
+          res.write(`data: ${JSON.stringify({ type: 'progress', result })}\n\n`);
         }
       }
 
-      res.json(results);
+      // Send completion message
+      res.write(`data: ${JSON.stringify({ type: 'complete', results })}\n\n`);
+      res.end();
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      // Only send error if headers haven't been sent
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message });
+      }
+      // If headers were sent, send error through SSE
+      else {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      }
     }
   });
 
