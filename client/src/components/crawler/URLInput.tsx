@@ -45,7 +45,7 @@ export function URLInput({ url, isLoading, onUrlChange, onSubmit, settings, onSe
             placeholder="Enter documentation URL (e.g. https://docs.example.com)"
             value={url}
             onChange={(e) => onUrlChange(e.target.value)}
-            className="pl-12 pr-[160px] h-14 text-lg rounded-2xl border-2 hover:border-primary/50 transition-colors"
+            className="pl-12 pr-[160px] h-14 text-lg rounded-md border-2 hover:border-primary/50 transition-colors"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -65,7 +65,7 @@ export function URLInput({ url, isLoading, onUrlChange, onSubmit, settings, onSe
               type="submit"
               disabled={!url || isLoading}
               size="sm"
-              className="rounded-xl"
+              className="rounded-md"
             >
               {isLoading ? (
                 <span className="flex items-center gap-2">

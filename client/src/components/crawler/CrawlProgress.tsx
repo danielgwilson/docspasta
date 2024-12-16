@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
 import { FileText, Hash, Link as LinkIcon } from "lucide-react"
 import { motion } from "framer-motion"
@@ -7,9 +8,10 @@ import type { CrawlResult } from "@/types/crawler"
 
 interface CrawlProgressProps {
   results: CrawlResult[]
+  isFinished: boolean
 }
 
-export function CrawlProgress({ results }: CrawlProgressProps) {
+export function CrawlProgress({ results, isFinished }: CrawlProgressProps) {
   const completedCount = results.filter(r => r.status === "complete").length;
   const currentResult = results[results.length - 1];
 
@@ -20,29 +22,33 @@ export function CrawlProgress({ results }: CrawlProgressProps) {
       transition={{ duration: 0.3 }}
     >
       <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Progress 
-                value={completedCount} 
-                max={Math.max(results.length, completedCount + 1)} 
-                className="w-full"
-              />
-              <div className="flex justify-between text-sm text-muted-foreground">
-                <span>
-                  Processed: {completedCount}
-                </span>
-                {currentResult && (
-                  <span className="truncate ml-2">
-                    Currently processing: {currentResult.title}
+        <CardContent className="p-4">
+          <div className="space-y-2">
+            {
+              !isFinished &&
+              <div className="space-y-2 pb-4">
+                <Progress 
+                  value={completedCount} 
+                  max={Math.max(results.length, completedCount + 1)} 
+                  className="w-full rounded"
+                />
+                <div className="flex justify-between text-sm text-muted-foreground pb-4">
+                  <span>
+                    Processed: {completedCount}
                   </span>
-                )}
+                  {currentResult && (
+                    <span className="truncate ml-2">
+                      Currently processing: {currentResult.title}
+                    </span>
+                  )}
+                </div>
+                <Separator className="mt-12" />
               </div>
-            </div>
+            }
             
-            <div className="grid grid-cols-3 gap-2 pt-4 border-t">
+            <div className="flex justify-between">
               <motion.div 
-                className="space-y-0.5"
+                className="w-full space-y-0.5 flex flex-col gap-1 items-center"
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.1 }}
@@ -61,13 +67,13 @@ export function CrawlProgress({ results }: CrawlProgressProps) {
                     results.reduce((sum, r) => sum + encode(r.content).length, 0)
                   )}
                 </motion.p>
-                <div className="text-[10px] text-muted-foreground">
+                {/* <div className="text-[10px] text-muted-foreground">
                   (~{Math.round(results.reduce((sum, r) => sum + encode(r.content).length, 0) * 0.0004 * 100) / 100}¢)
-                </div>
+                </div> */}
               </motion.div>
               
               <motion.div 
-                className="space-y-0.5"
+                className="w-full space-y-0.5 flex flex-col gap-1 items-center"
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.2 }}
@@ -76,7 +82,7 @@ export function CrawlProgress({ results }: CrawlProgressProps) {
                   <FileText className="w-3 h-3" />
                   Words
                 </div>
-                <p className="text-sm">
+                <p className="text-base font-medium">
                   {Intl.NumberFormat('en-US', { notation: 'compact' }).format(
                     results.reduce((sum, r) => sum + r.content.split(/\s+/).length, 0)
                   )}
@@ -84,7 +90,7 @@ export function CrawlProgress({ results }: CrawlProgressProps) {
               </motion.div>
               
               <motion.div 
-                className="space-y-0.5"
+                className="w-full space-y-0.5 flex flex-col gap-1 items-center"
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.3 }}
@@ -93,7 +99,7 @@ export function CrawlProgress({ results }: CrawlProgressProps) {
                   <LinkIcon className="w-3 h-3" />
                   Pages
                 </div>
-                <p className="text-sm">
+                <p className="text-base font-medium">
                   {completedCount}
                 </p>
               </motion.div>

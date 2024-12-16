@@ -161,50 +161,52 @@ export default function Home() {
   }, [url]);
 
   return (
-    <div className="min-h-screen bg-background p-2">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <div className="min-h-screen bg-background flex items-center px-4 py-8 sm:px-6 lg:px-8">
+      <div className="max-w-3xl w-full mx-auto space-y-12">
         <div className="flex flex-col gap-4">
-          <AnimatePresence mode="wait">
-            {!crawlMutation.isPending && (
-              <motion.h1
-                key="title"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="text-5xl font-bold tracking-tight text-center pt-12"
-              >
-                What docs should I crawl for you?
-              </motion.h1>
-            )}
-          </AnimatePresence>
-
-          <URLInput
-            url={url}
+          <div className="flex flex-col gap-4">
+            <AnimatePresence mode="wait">
+              {!crawlMutation.isPending && (
+                <motion.h1
+                  key="title"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="text-5xl font-bold tracking-tight text-center pb-8"
+                >
+                  What docs should I crawl for you?
+                </motion.h1>
+              )}
+            </AnimatePresence>
+  
+            <URLInput
+              url={url}
+              isLoading={crawlMutation.isPending}
+              onUrlChange={setUrl}
+              onSubmit={() => crawlMutation.mutate(url)}
+              settings={settings}
+              onSettingsChange={(newSettings) => {
+                if (newSettings) {
+                  setSettings(newSettings);
+                }
+  
+                return settings;
+              }}
+            />
+          </div>
+  
+          <QuickActions
             isLoading={crawlMutation.isPending}
-            onUrlChange={setUrl}
-            onSubmit={() => crawlMutation.mutate(url)}
-            settings={settings}
-            onSettingsChange={(newSettings) => {
-              if (newSettings) {
-                setSettings(newSettings);
-              }
-
-              return settings;
+            onSelect={(selectedUrl) => {
+              setUrl(selectedUrl);
+              setTimeout(() => crawlMutation.mutate(selectedUrl), 100);
             }}
           />
         </div>
 
-        <QuickActions
-          isLoading={crawlMutation.isPending}
-          onSelect={(selectedUrl) => {
-            setUrl(selectedUrl);
-            setTimeout(() => crawlMutation.mutate(selectedUrl), 100);
-          }}
-        />
-
         {url && !crawlMutation.isPending && previewMutation.data && (
           <Card className="border-dashed">
-            <CardContent className="pt-6">
+            <CardContent className="p-4">
               <div className="space-y-2">
                 <h3 className="font-medium">{previewMutation.data.title}</h3>
                 <p className="text-sm text-muted-foreground">
@@ -215,14 +217,22 @@ export default function Home() {
           </Card>
         )}
 
-        {crawlMutation.isPending && <CrawlProgress results={results} />}
+        {crawlMutation.isPending && <CrawlProgress results={results} isFinished={false} />}
 
-        {results.length > 0 && (
-          <>
-            <CrawlSummary results={results} />
-            <ResultsList results={results} />
-          </>
-        )}
+        <AnimatePresence mode="wait">
+          {results.length > 0 && !crawlMutation.isPending && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-6"
+            >
+              <CrawlProgress results={results} isFinished />
+              {/* <CrawlSummary results={results} /> */}
+              <ResultsList results={results} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

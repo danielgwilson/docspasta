@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
+import { ArrowUpRight } from "lucide-react"
 
 interface QuickActionsProps {
   onSelect: (url: string) => void
@@ -34,7 +35,7 @@ export function QuickActions({ onSelect, isLoading }: QuickActionsProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="flex gap-2 justify-center mt-4"
+      className="flex gap-3 justify-center p-0 mt-0"
     >
       {QUICK_ACTIONS_CONFIG.map((action, i) => {
         return (
@@ -44,9 +45,10 @@ export function QuickActions({ onSelect, isLoading }: QuickActionsProps) {
             disabled={isLoading}
             variant="outline"
             size="sm"
-            className="rounded-md"
+            className="rounded-md text-xs px-2 h-6 gap-0.5"
           >
-            {action.title}
+            <span className="">{action.title}</span>
+            <ArrowUpRight className="w-4 h-4 -mr-1" />
           </Button>
         )
       })}
