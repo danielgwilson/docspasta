@@ -45,4 +45,21 @@ export class Hierarchy {
       lvl6: null
     };
   }
+
+  /**
+   * Extract hierarchy from a DOM element
+   */
+  static extractHierarchy(mainElement: Element): Record<string, string | null> {
+    const hierarchy = this.generateEmptyHierarchy();
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    
+    levels.forEach((tag, index) => {
+      const el = mainElement.querySelector(tag);
+      if (el?.textContent?.trim()) {
+        hierarchy[`lvl${index}`] = el.textContent.trim();
+      }
+    });
+    
+    return hierarchy;
+  }
 }
