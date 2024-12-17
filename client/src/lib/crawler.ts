@@ -1,6 +1,8 @@
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
 import crypto from 'crypto';
+import { Anchor } from './utils/anchor';
+import { Hierarchy } from './utils/hierarchy';
 
 // Initialize Turndown for Markdown conversion
 const turndownService = new TurndownService({
@@ -38,12 +40,16 @@ interface VisitedPage {
   depth: number;
   title: string;
   parent?: string;
+  hierarchy: Record<string, string | null>;
+  anchor?: string | null;
 }
 
 interface PageNode {
   url: string;
   depth: number;
   parent?: string;
+  hierarchy?: Record<string, string | null>;
+  anchor?: string | null;
 }
 
 export class DocumentationCrawler {
@@ -192,7 +198,13 @@ export class DocumentationCrawler {
     return newNodes;
   }
 
-  private extractMainContent(html: string): { content: string, title: string, isDocPage: boolean } {
+  private extractMainContent(html: string): { 
+    content: string, 
+    title: string, 
+    isDocPage: boolean,
+    hierarchy: Record<string, string | null>,
+    anchor: string | null
+  } {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     
@@ -279,13 +291,27 @@ ${markdown}
 
 ================================================================`;
     
+    // Build hierarchy
+    const hierarchy = Hierarchy.generateEmptyHierarchy();
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    
+    levels.forEach((tag, index) => {
+      const element = mainElement?.querySelector(tag);
+      if (element) {
+        hierarchy[`lvl${index}`] = element.textContent?.trim() || null;
+      }
+    });
+
+    // Get anchor
+    const anchor = Anchor.getAnchor(mainElement);
+    
     const isDocPage = Boolean(
       mainElement.querySelector('h1, h2, h3') ||
       mainElement.querySelector('pre code') ||
       (mainElement.textContent?.length || 0) > 500
     );
     
-    return { content: output, title, isDocPage };
+    return { content: output, title, isDocPage, hierarchy, anchor };
   }
 
   public async *crawl() {
@@ -324,7 +350,7 @@ ${markdown}
         this.queue.unshift(...newNodes);
         
         // Process content
-        const { content, title, isDocPage } = this.extractMainContent(html);
+        const { content, title, isDocPage, hierarchy, anchor } = this.extractMainContent(html);
         
         if (!isDocPage) {
           continue;
@@ -336,7 +362,9 @@ ${markdown}
           fingerprint,
           depth,
           title,
-          parent
+          parent,
+          hierarchy,
+          anchor
         });
         
         // Yield the processed page
@@ -346,6 +374,9 @@ ${markdown}
           content,
           depth,
           parent,
+          hierarchy,
+          hierarchyRadio: Hierarchy.getHierarchyRadio(hierarchy, 'content', ['lvl0', 'lvl1', 'lvl2', 'lvl3', 'lvl4', 'lvl5', 'lvl6']),
+          anchor,
           status: "complete"
         };
         
