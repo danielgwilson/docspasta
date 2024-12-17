@@ -1,18 +1,64 @@
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
 
-// Initialize Turndown for HTML to Markdown conversion
+// Initialize Turndown with optimized configuration
 const turndownService = new TurndownService({
   headingStyle: 'atx',
-  codeBlockStyle: 'fenced'
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '_',
+  strongDelimiter: '**',
+  hr: '---',
+  br: '  \n'
 });
 
-// Configure Turndown to handle code blocks better
+// Enhanced code block handling
 turndownService.addRule('fencedCodeBlock', {
-  filter: ['pre', 'code'],
+  filter: (node) => {
+    return (
+      node.nodeName === 'PRE' ||
+      (node.nodeName === 'CODE' && node.parentNode?.nodeName !== 'PRE')
+    );
+  },
   replacement: function(content, node) {
-    const language = node.getAttribute('class')?.replace('language-', '') || '';
-    return `\n\`\`\`${language}\n${content}\n\`\`\`\n`;
+    // Detect language from class or data attribute
+    const language = 
+      node.getAttribute('class')?.replace(/(language-|highlight-|lang-)/g, '') ||
+      node.getAttribute('data-lang') ||
+      '';
+    
+    // Clean up the content
+    const cleanContent = content
+      .replace(/^\n+|\n+$/g, '') // Remove leading/trailing newlines
+      .replace(/\n\s+/g, '\n') // Remove extra whitespace at line starts
+      .replace(/\t/g, '  ') // Convert tabs to spaces
+      .trim();
+    
+    return `\n\`\`\`${language}\n${cleanContent}\n\`\`\`\n`;
+  }
+});
+
+// Improved whitespace handling
+turndownService.addRule('paragraph', {
+  filter: 'p',
+  replacement: function(content) {
+    return '\n\n' + content.trim() + '\n\n';
+  }
+});
+
+// Better list handling
+turndownService.addRule('list', {
+  filter: ['ul', 'ol'],
+  replacement: function(content, node) {
+    const isOrdered = node.nodeName === 'OL';
+    const listItems = content
+      .trim()
+      .split('\n')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map((item, i) => isOrdered ? `${i + 1}. ${item}` : `- ${item}`)
+      .join('\n');
+    return '\n\n' + listItems + '\n\n';
   }
 });
 
@@ -58,67 +104,150 @@ export function extractLinks(html: string, baseUrl: string): string[] {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   
-  // Common documentation path patterns for prioritization
+  // Enhanced documentation path patterns
   const docPatterns = [
     '/docs/',
     '/documentation/',
     '/guide/',
+    '/guides/',
     '/tutorial/',
+    '/tutorials/',
     '/reference/',
     '/manual/',
     '/learn/',
     '/api/',
     '/getting-started',
-    '/quickstart'
+    '/quickstart',
+    '/introduction',
+    '/overview',
+    '/concepts/',
+    '/examples/',
+    '/faq/',
+    '/troubleshooting/',
+    '/best-practices/',
   ];
   
-  // Get all links from the page
-  const allLinks = Array.from(doc.querySelectorAll('a[href]'));
+  // Get all links, excluding those in navigation elements
+  const allLinks = Array.from(doc.querySelectorAll('a[href]')).filter(a => {
+    const isInNavigation = 
+      a.closest('nav') ||
+      a.closest('header') ||
+      a.closest('footer') ||
+      a.closest('.navigation') ||
+      a.closest('.menu') ||
+      a.closest('.sidebar') ||
+      a.closest('[role="navigation"]') ||
+      a.closest('.breadcrumbs') ||
+      a.closest('.toc') ||
+      a.closest('[class*="menu"]') ||
+      a.closest('[class*="nav"]');
+    
+    return !isInNavigation;
+  });
   
-  // Process and filter links
+  // Process and filter links with improved validation
   const links = allLinks
-    .map(a => a.getAttribute('href'))
-    .filter((href): href is string => !!href)
-    .map(href => {
+    .map(a => {
+      const href = a.getAttribute('href');
+      if (!href) return null;
+      
       try {
         const url = new URL(href, baseUrl);
-        // Normalize URL by removing hash and query parameters
+        // Normalize URL
         url.hash = '';
         url.search = '';
-        return url.toString();
+        // Remove trailing slash for consistency
+        return url.toString().replace(/\/$/, '');
       } catch {
         return null;
       }
     })
     .filter((url): url is string => {
       if (!url) return false;
+      
       try {
         const parsedUrl = new URL(url);
         const baseUrlObj = new URL(baseUrl);
         
-        // Must be same hostname
+        // Enhanced hostname validation
         if (parsedUrl.hostname !== baseUrlObj.hostname) return false;
         
-        // Exclude common non-content URLs
+        // Comprehensive exclusion patterns
         const excludePatterns = [
+          // Infrastructure and system paths
           '/cdn-cgi/',
+          '/__/',
           '/wp-admin/',
           '/wp-content/',
+          '/wp-includes/',
           '/assets/',
           '/static/',
+          '/dist/',
+          '/build/',
+          '/node_modules/',
+          
+          // Authentication and user management
           '/login',
           '/logout',
           '/signup',
           '/register',
+          '/signin',
+          '/signout',
+          '/auth/',
+          '/oauth/',
+          '/account/',
+          '/profile/',
+          '/password/',
+          
+          // Media and resource files
           '.jpg',
           '.jpeg',
           '.png',
           '.gif',
+          '.svg',
+          '.ico',
           '.css',
-          '.js'
+          '.js',
+          '.json',
+          '.xml',
+          '.pdf',
+          '.zip',
+          '.tar',
+          '.gz',
+          
+          // Analytics and tracking
+          '/analytics/',
+          '/tracking/',
+          '/metrics/',
+          '/stats/',
+          
+          // Common non-documentation paths
+          '/cart/',
+          '/checkout/',
+          '/pricing/',
+          '/download/',
+          '/contact/',
+          '/support/',
+          '/terms/',
+          '/privacy/',
+          '/sitemap/',
+          '/rss/',
+          '/feed/',
+          '/search/',
+          
+          // Social media
+          '/share/',
+          '/social/',
+          '/follow/',
+          
+          // Version control
+          '/.git/',
+          '/.svn/',
         ];
         
-        if (excludePatterns.some(pattern => url.toLowerCase().includes(pattern))) {
+        if (excludePatterns.some(pattern => 
+          url.toLowerCase().includes(pattern.toLowerCase())
+        )) {
           return false;
         }
         
@@ -159,42 +288,94 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   
-  // Try to find the main content area
+  // Try to find the main content area with improved selector specificity
   const mainContent =
-    doc.querySelector('main') ||
-    doc.querySelector('article') ||
+    doc.querySelector('main[role="main"]') ||
+    doc.querySelector('article[role="article"]') ||
     doc.querySelector('[role="main"]') ||
-    doc.querySelector('.content') ||
-    doc.querySelector('.documentation') ||
-    doc.querySelector('[class*="content"]') ||
-    doc.querySelector('[class*="docs"]');
+    doc.querySelector('main') ||
+    doc.querySelector('article:not(footer article)') ||
+    doc.querySelector('.content:not(.nav-content):not(.footer-content)') ||
+    doc.querySelector('.documentation:not(.nav-documentation)') ||
+    doc.querySelector('[class*="content"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])') ||
+    doc.querySelector('[class*="docs"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])');
     
   let contentElement = mainContent;
   if (!contentElement) {
-    contentElement = doc.querySelector('body');
+    // If no main content area found, try to find the largest text block
+    const textBlocks = Array.from(doc.querySelectorAll('div, section'))
+      .filter(el => {
+        const text = el.textContent || '';
+        return text.length > 500 && // Minimum content length
+               text.split(/[.!?]/).length > 5; // Minimum number of sentences
+      })
+      .sort((a, b) => (b.textContent || '').length - (a.textContent || '').length);
+    
+    contentElement = textBlocks[0] || doc.querySelector('body');
   }
   
   if (!contentElement) {
     return { content: '', isDocPage: false };
   }
 
-  // Remove non-content elements before processing
-  [
+  // Enhanced list of elements to remove
+  const removeSelectors = [
+    // Navigation elements
     'nav', 'header', 'footer', 
     '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer',
-    'style', 'script', 'noscript', // Remove styles and scripts
-    '[role="navigation"]', '[role="complementary"]', // Remove ARIA-marked navigation
-    '.table-of-contents', '.toc', // Common table of contents
-    '.breadcrumbs', '.breadcrumb', // Navigation breadcrumbs
-    '[class*="menu"]', '[class*="nav"]', // Any menu or navigation classes
-  ].forEach(selector => {
+    '[role="navigation"]', '[role="complementary"]',
+    '.table-of-contents', '.toc', 
+    '.breadcrumbs', '.breadcrumb',
+    '[class*="menu"]', '[class*="nav"]',
+    
+    // Social and interactive elements
+    '.share', '.social', '.comments', '.related',
+    '[class*="share"]', '[class*="social"]', '[class*="comment"]',
+    
+    // Advertisement and promotional content
+    '.ad', '.ads', '.advertisement', '.sponsored',
+    '[class*="ad-"]', '[class*="ads-"]', '[id*="google_ads"]',
+    
+    // Utility elements
+    '.toolbar', '.tools', '.utility', '.print',
+    '[class*="toolbar"]', '[class*="utility"]',
+    
+    // Technical elements
+    'style', 'script', 'noscript', 'iframe',
+    'link', 'meta', 'template', 'svg',
+    
+    // Dynamic content containers
+    '[data-widget]', '[data-ad]', '[data-tracking]',
+    '[id*="tracking"]', '[id*="analytics"]',
+    
+    // Sidebars and supplementary content
+    'aside', '.aside', '.supplementary', '.secondary',
+    '[role="complementary"]', '[role="banner"]'
+  ];
+
+  // Remove non-content elements
+  removeSelectors.forEach(selector => {
     contentElement.querySelectorAll(selector).forEach(el => el.remove());
   });
 
-  // Remove style attributes and CSS variables
+  // Clean up elements
   contentElement.querySelectorAll('*').forEach(el => {
-    el.removeAttribute('style');
-    el.removeAttribute('class');
+    // Remove non-content attributes
+    const keepAttrs = ['href', 'src', 'alt', 'title', 'lang'];
+    Array.from(el.attributes).forEach(attr => {
+      if (!keepAttrs.includes(attr.name)) {
+        el.removeAttribute(attr.name);
+      }
+    });
+    
+    // Normalize whitespace in text nodes
+    if (el.childNodes) {
+      el.childNodes.forEach(node => {
+        if (node.nodeType === 3) { // Text node
+          node.textContent = node.textContent?.replace(/\s+/g, ' ').trim();
+        }
+      });
+    }
   });
   
   if (!contentElement) {
