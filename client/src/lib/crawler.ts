@@ -84,22 +84,34 @@ export class DocumentationCrawler {
   private async fetchPage(url: string, retries = 3): Promise<string> {
     await this.rateLimit();
     
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    
     for (let attempt = 0; attempt < retries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       try {
         const response = await fetch(url, {
-          headers: { 'User-Agent': 'Documentation Crawler - Friendly Bot' },
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (compatible; Documentation Crawler Bot/1.0)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5'
+          },
           signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        return response.text();
+        const text = await response.text();
+        if (!text.trim()) {
+          throw new Error('Empty response');
+        }
+        
+        return text;
       } catch (error) {
+        clearTimeout(timeoutId);
         if (attempt === retries - 1) throw error;
         await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000));
       }
