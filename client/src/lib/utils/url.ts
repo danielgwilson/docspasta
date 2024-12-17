@@ -6,9 +6,17 @@ import crypto from 'crypto';
  */
 export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: boolean): string {
   try {
-    // Ensure URL has a protocol
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'https://' + url;
+    // Filter out obviously invalid URLs
+    if (!url || url === '/' || url === '#' || url.includes('javascript:')) {
+      return '';
+    }
+
+    // Handle relative URLs
+    if (url.startsWith('/')) {
+      const base = new URL(baseUrl);
+      url = `${base.origin}${url}`;
+    } else if (!url.match(/^https?:\/\//)) {
+      url = new URL(url, baseUrl).toString();
     }
     
     const parsed = new URL(url);
@@ -16,22 +24,16 @@ export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: 
     parsed.search = '';
     parsed.pathname = parsed.pathname.replace(/\/$/, '').toLowerCase();
     
-    // Only check external links if we have a baseUrl
-    if (baseUrl && !followExternalLinks) {
-      try {
-        const baseUrlParsed = new URL(baseUrl);
-        if (parsed.origin !== baseUrlParsed.origin) {
-          return '';
-        }
-      } catch {
-        // If baseUrl is invalid, continue with the original URL
+    if (!followExternalLinks && baseUrl) {
+      const baseUrlParsed = new URL(baseUrl);
+      if (parsed.origin !== baseUrlParsed.origin) {
+        return '';
       }
     }
     
     return parsed.toString();
   } catch (error) {
-    console.error('Failed to parse URL:', url, error);
-    throw new Error(`Failed to parse URL: ${url}. Please make sure you entered a valid URL.`);
+    return '';
   }
 }
 
