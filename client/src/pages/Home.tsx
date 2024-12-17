@@ -31,7 +31,7 @@ export default function Home() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ url: input }),
+          body: JSON.stringify({ url: input, settings }),
         })
           .then((response) => {
             if (!response.ok) {
@@ -138,7 +138,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url: input }),
+        body: JSON.stringify({ url: input, settings }),
       });
 
       if (!response.ok) {
