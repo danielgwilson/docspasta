@@ -45,31 +45,44 @@ export function generateFingerprint(url: string, includeScheme = true): string {
 export function isValidDocumentationUrl(url: string): boolean {
   const normalized = url.toLowerCase();
   
-  const skipPatterns = [
-    '/cdn-cgi/', '/__/', '/wp-admin/', '/wp-content/',
-    '/wp-includes/', '/assets/', '/static/', '/dist/',
-    '/login', '/signup', '/register', '/account/',
-    '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', '.xml', '.pdf'
+  // Skip binary and asset files
+  const skipExtensions = [
+    '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', 
+    '.xml', '.pdf', '.zip', '.tar', '.gz', '.mp4'
   ];
   
-  if (skipPatterns.some(pattern => normalized.includes(pattern))) {
+  if (skipExtensions.some(ext => normalized.endsWith(ext))) {
     return false;
   }
   
+  // Skip system and admin paths
+  const skipPaths = [
+    '/cdn-cgi/', '/__/', '/wp-admin/', '/wp-includes/',
+    '/login', '/signup', '/register', '/account/'
+  ];
+  
+  if (skipPaths.some(path => normalized.includes(path))) {
+    return false;
+  }
+  
+  // Check for documentation-related patterns
   const docPatterns = [
     '/docs/', '/documentation/', '/guide/', '/reference/',
     '/manual/', '/learn/', '/tutorial/', '/api/',
-    '/getting-started', '/quickstart', '/introduction'
+    '/getting-started', '/quickstart', '/introduction',
+    '/overview', '/start', '/examples', '/usage'
   ];
-  
-  if (docPatterns.some(pattern => normalized.includes(pattern))) {
-    return true;
-  }
   
   try {
     const urlObj = new URL(url);
-    // Always allow the initial URL and its direct children
-  return urlObj.pathname.length > 0;
+    const path = urlObj.pathname.toLowerCase();
+    
+    // Always allow the root path and known doc patterns
+    return path === '/' || 
+           path === '/index.html' ||
+           docPatterns.some(pattern => path.includes(pattern)) ||
+           // Allow paths that look like documentation sections
+           /^\/[\w-]+(?:\/[\w-]+)*\/?$/.test(path);
   } catch {
     return false;
   }

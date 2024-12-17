@@ -152,8 +152,12 @@ export class DocumentationCrawler {
     console.debug(`[Crawler] Starting crawl with ${this.queue.length} URLs in queue`);
     
     while (this.queue.length > 0 && !this.isTimeoutReached()) {
+      if (this.activeRequests >= this.options.maxConcurrentRequests) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
+
       const { url, depth, parent } = this.queue.shift()!;
-      
       console.debug(`[Crawler] Processing ${url} at depth ${depth}`);
       
       if (depth > this.options.maxDepth) {
@@ -162,13 +166,14 @@ export class DocumentationCrawler {
       }
 
       const fingerprint = generateFingerprint(url, false);
-      if (this.visited.has(fingerprint) || this.fingerprints.has(fingerprint)) {
+      if (this.fingerprints.has(fingerprint)) {
         console.debug(`[Crawler] Skipping ${url} - Already visited`);
         continue;
       }
 
-      this.visited.add(fingerprint);
+      // Mark as visited before processing to prevent duplicates
       this.fingerprints.add(fingerprint);
+      this.activeRequests++;
       
       try {
         const html = await this.fetchPage(url);
@@ -241,7 +246,6 @@ export class DocumentationCrawler {
           status: "complete",
           newLinksFound: newLinksCount
         };
-        
       } catch (error) {
         console.error(`[Crawler] Error processing ${url}:`, error);
         yield {
@@ -254,9 +258,16 @@ export class DocumentationCrawler {
           status: "error",
           error: error instanceof Error ? error.message : String(error)
         };
+      } finally {
+        this.activeRequests--;
       }
     }
     
-    console.debug(`[Crawler] Crawl complete. Processed ${this.visited.size} pages`);
+    // Wait for any remaining requests to complete
+    while (this.activeRequests > 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.debug(`[Crawler] Crawl complete. Processed ${this.fingerprints.size} pages`);
   }
 }
