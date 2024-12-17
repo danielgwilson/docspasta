@@ -3,6 +3,7 @@ import TurndownService from 'turndown';
 import crypto from 'crypto';
 import { Anchor } from './utils/anchor';
 import { Hierarchy } from './utils/hierarchy';
+import { CodeBlockHandler } from './utils/codeblock';
 import { normalizeUrl, generateFingerprint, isValidDocumentationUrl } from './utils/url';
 import type { CrawlerOptions, PageResult, PageNode, VisitedPage, ValidatedCrawlerOptions } from './utils/types';
 import { crawlerOptionsSchema } from './utils/types';
@@ -199,6 +200,9 @@ export class DocumentationCrawler {
     }
 
     this.cleanContent(mainElement);
+    
+    // Process code blocks before conversion
+    CodeBlockHandler.processCodeBlocks(mainElement);
     
     const title = this.extractTitle(doc);
     const markdown = turndownService.turndown(mainElement.innerHTML);

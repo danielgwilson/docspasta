@@ -47,19 +47,32 @@ export class Hierarchy {
   }
 
   /**
-   * Extract hierarchy from a DOM element
+   * Extract hierarchy from a DOM element by finding all heading tags
+   * and mapping them to the appropriate level
    */
   static extractHierarchy(mainElement: Element): Record<string, string | null> {
     const hierarchy = this.generateEmptyHierarchy();
-    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    const headingElements = mainElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
     
-    levels.forEach((tag, index) => {
-      const el = mainElement.querySelector(tag);
-      if (el?.textContent?.trim()) {
-        hierarchy[`lvl${index}`] = el.textContent.trim();
+    Array.from(headingElements).forEach(heading => {
+      const level = parseInt(heading.tagName[1]) - 1;
+      const content = heading.textContent?.trim();
+      
+      if (content && level >= 0 && level <= 6) {
+        hierarchy[`lvl${level}`] = content;
       }
     });
     
     return hierarchy;
+  }
+
+  /**
+   * Extract text content from a DOM element, normalizing whitespace
+   * and removing any unwanted characters
+   */
+  static extractContent(element: Element): string {
+    return (element.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 }
