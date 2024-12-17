@@ -1,3 +1,4 @@
+
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
 import crypto from 'crypto';
@@ -165,14 +166,13 @@ export class DocumentationCrawler {
         continue;
       }
 
-      const fingerprint = generateFingerprint(url, false);
-      if (this.fingerprints.has(fingerprint)) {
+      if (this.visited.has(url)) {
         console.debug(`[Crawler] Skipping ${url} - Already visited`);
         continue;
       }
 
       // Mark as visited before processing to prevent duplicates
-      this.fingerprints.add(fingerprint);
+      this.visited.add(url);
       this.activeRequests++;
       
       try {
@@ -187,10 +187,10 @@ export class DocumentationCrawler {
           const fingerprint = generateFingerprint(node.url, false);
           if (!this.fingerprints.has(fingerprint)) {
             this.queue.push(node);
+            this.fingerprints.add(fingerprint);
             newLinksCount++;
           }
         }
-        console.debug(`[Crawler] Found ${newLinksCount} new links on ${url}`);
 
         const mainElement = this.findMainElement(doc);
         if (!mainElement) {
@@ -209,14 +209,6 @@ export class DocumentationCrawler {
         
         const isDocPage = hasHeadings || hasCodeBlocks || (hasSubstantialText && hasParagraphs);
         
-        console.debug(`[Crawler] Page analysis for ${url}:
-          Has headings: ${hasHeadings}
-          Has code blocks: ${hasCodeBlocks}
-          Has substantial text: ${hasSubstantialText}
-          Has paragraphs: ${hasParagraphs}
-          Is doc page: ${isDocPage}
-        `);
-
         if (!isDocPage) {
           console.debug(`[Crawler] Skipping ${url} - Not a documentation page`);
           continue;
@@ -268,6 +260,6 @@ export class DocumentationCrawler {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    console.debug(`[Crawler] Crawl complete. Processed ${this.fingerprints.size} pages`);
+    console.debug(`[Crawler] Crawl complete. Processed ${this.visited.size} pages`);
   }
 }
