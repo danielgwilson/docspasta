@@ -1,0 +1,457 @@
+Below is a thoroughly reimagined, best-practices implementation of a documentation crawler and processor that:
+	1.	Robustly Crawls Documentation Sites
+	•	Supports arbitrary depths, respecting user-defined max depth and other parameters.
+	•	Handles retry logic and timeouts gracefully.
+	•	Normalizes and deduplicates URLs to avoid repeated crawling.
+	•	Respects followExternalLinks and filters non-doc URLs.
+	•	Rate limits requests to avoid overloading target servers.
+	2.	Intelligent Content Extraction and Formatting
+	•	Identifies main documentation content using multiple heuristics and fallback strategies.
+	•	Removes navigation, ads, and irrelevant UI components.
+	•	Uses a markdown conversion strategy tailored for coding documentation (e.g., preserving code blocks, headings, lists, tables).
+	•	Preserves a logical hierarchy (H1-H6) and extracts a clean anchor if available.
+	•	Minimizes token usage by removing duplicates and formatting the output to be concise and context-rich.
+	•	Adds a short top-level summary and any necessary metadata (optional) for context when pasting into LLMs.
+	3.	Progress and Preview Updates
+	•	Stream results as pages are processed.
+	•	Provide incremental updates for UI previews.
+	4.	Optimizing for LLM Consumption
+	•	Outputs a self-contained Markdown snippet suitable for pasting into an LLM conversation.
+	•	Optionally includes a brief preamble explaining the content to the LLM, preserving only essential formatting.
+	•	Deduplicates content across pages if detected (optional advanced feature).
+	•	Ensures code blocks have proper language labels where detected.
+	5.	Exemplary Code Organization
+	•	Clear, maintainable, and testable code structure.
+	•	Single-responsibility classes and functions.
+	•	Detailed comments and docstrings.
+
+Implementation Instructions for the LLM Agent
+
+General Steps:
+	1.	Setup:
+	•	Install jsdom, turndown, and node-fetch (if not already available, or use the built-in fetch in some environments).
+	•	Create a main crawler class DocumentationCrawler that manages queue, visited sets, and fetch logic.
+	•	Create separate utility modules for:
+	•	URL normalization and fingerprinting.
+	•	DOM extraction and content cleaning.
+	•	Markdown conversion with Turndown.
+	•	Hierarchy extraction.
+	•	Anchor extraction.
+	2.	Crawling Logic:
+	•	Use a queue (FIFO or priority-based) to track URLs to process.
+	•	Before processing a URL, normalize and generate a fingerprint. Skip if already visited.
+	•	Respect user options (maxDepth, followExternalLinks, excludeNavigation, etc.).
+	•	Implement a rate limiter to avoid hitting servers too fast.
+	•	Implement robust retry logic for failed fetches, with exponential backoff.
+	3.	Content Extraction:
+	•	Parse the HTML with JSDOM.
+	•	Identify main content using selectors and fallback to heuristics (e.g., largest text block with headings).
+	•	Remove unwanted elements (nav, script, style, ads) before conversion.
+	•	Convert to Markdown with Turndown, preserving code blocks.
+	•	Extract a hierarchical structure from headings.
+	•	Attempt to find and record an anchor for the page if available.
+	4.	Duplicate Detection & Token Efficiency:
+	•	Maintain a set of previously seen content hashes (e.g., using a SHA-1 hash of the page’s main content).
+	•	If duplicate detected, skip or mark it as duplicate.
+	•	Consider partial deduplication (e.g., repeated navigation replaced with {{NAVIGATION}} or omitted completely).
+	5.	Output Formatting:
+	•	Return a structured object including: url, title, depth, hierarchy, anchor, markdownContent.
+	•	Include a top-level metadata section and a well-formatted Markdown output for each crawled page.
+	•	For final output, present a concatenation or selection of pages as needed.
+	•	Stream results (e.g., using async generator) so UI can show progress.
+	6.	Integration with UI:
+	•	The crawl() method is an async generator that yields results as they are processed.
+	•	Each result can be shown in the UI for immediate preview.
+	•	On completion, the UI can consolidate the pages.
+	7.	Testing & Validation:
+	•	Test with various documentation sites.
+	•	Ensure that common patterns (like removing nav bars) work reliably.
+	•	Confirm code blocks are preserved correctly.
+	•	Confirm headings and hierarchy are correctly extracted.
+
+Note to the LLM agent:
+	•	Follow the below code outline closely.
+	•	You may rewrite or reorganize code for clarity, but ensure all features and instructions are implemented.
+	•	Provide comprehensive comments.
+	•	Make sure the code is self-contained and can be easily extended if needed.
+
+Example Code Outline
+
+// utils/urlUtils.ts
+import crypto from 'crypto';
+
+/**
+ * Normalize a URL relative to a base URL.
+ * Removes fragments and queries, enforces lowercase pathname.
+ * Returns empty string if URL is invalid or should be skipped.
+ */
+export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: boolean): string {
+  try {
+    const parsed = new URL(url, baseUrl);
+    parsed.hash = '';
+    parsed.search = '';
+    parsed.pathname = parsed.pathname.replace(/\/$/, '').toLowerCase();
+    if (!followExternalLinks && parsed.origin !== baseUrl) return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Generate a fingerprint of the URL without query/hash to detect duplicates.
+ * If includeScheme is false, strip the scheme part.
+ */
+export function generateFingerprint(url: string, includeScheme = true): string {
+  const parsed = new URL(url);
+  parsed.hash = '';
+  parsed.search = '';
+  let urlForFingerprint = parsed.toString();
+  if (!includeScheme) {
+    urlForFingerprint = urlForFingerprint.replace(/^(https?):\/\//, '');
+  }
+  return crypto.createHash('sha1').update(urlForFingerprint).digest('hex');
+}
+
+// utils/anchor.ts
+export class AnchorExtractor {
+  static getAnchorStringFromElement(element: Element): string | null {
+    return element.getAttribute('name') || element.getAttribute('id') || null;
+  }
+
+  static getAnchor(element: Element | null): string | null {
+    if (!element) return null;
+    let anchor = this.getAnchorStringFromElement(element);
+    if (anchor) return anchor;
+
+    const children = Array.from(element.querySelectorAll('[name], [id]'));
+    if (children.length > 0) {
+      anchor = this.getAnchorStringFromElement(children[children.length - 1]);
+      if (anchor) return anchor;
+    }
+
+    let el: Element | null = element;
+    while (el) {
+      let sibling = el.previousElementSibling;
+      while (sibling) {
+        anchor = this.getAnchorStringFromElement(sibling);
+        if (anchor) return anchor;
+        sibling = sibling.previousElementSibling;
+      }
+      el = el.parentElement;
+      if (el) {
+        anchor = this.getAnchorStringFromElement(el);
+        if (anchor) return anchor;
+      }
+    }
+
+    return null;
+  }
+}
+
+// utils/hierarchy.ts
+export class HierarchyUtils {
+  static generateEmptyHierarchy(): Record<string, string | null> {
+    return {
+      lvl0: null,
+      lvl1: null,
+      lvl2: null,
+      lvl3: null,
+      lvl4: null,
+      lvl5: null,
+      lvl6: null
+    };
+  }
+
+  static extractHierarchy(mainElement: Element): Record<string, string | null> {
+    const hierarchy = this.generateEmptyHierarchy();
+    const levels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    levels.forEach((tag, index) => {
+      const el = mainElement.querySelector(tag);
+      if (el && el.textContent?.trim()) {
+        hierarchy[`lvl${index}`] = el.textContent.trim();
+      }
+    });
+    return hierarchy;
+  }
+}
+
+// utils/contentExtractor.ts
+import { JSDOM } from 'jsdom';
+import TurndownService from 'turndown';
+import { AnchorExtractor } from './anchor';
+import { HierarchyUtils } from './hierarchy';
+
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '_',
+  strongDelimiter: '**'
+});
+
+/**
+ * Identifies a main content container using a set of priority selectors,
+ * and as fallback, the largest content block with headers/paragraphs.
+ */
+function findMainElement(doc: Document): Element | null {
+  const selectors = [
+    'article[role="main"]', 'main[role="main"]', 'div[role="main"]',
+    'main', 'article', '.content', '.article-content', '.markdown-body', '#content', '#main'
+  ];
+
+  for (const sel of selectors) {
+    const el = doc.querySelector(sel);
+    if (el && el.textContent?.trim()) return el;
+  }
+
+  // fallback: largest block containing doc-like content
+  const contentBlocks = Array.from(doc.querySelectorAll('div, section')).filter(el => {
+    const text = el.textContent || '';
+    const hasParagraphs = el.querySelectorAll('p').length > 0;
+    const hasHeaders = el.querySelectorAll('h1,h2,h3,h4,h5,h6').length > 0;
+    return text.length > 200 && (hasParagraphs || hasHeaders);
+  }).sort((a, b) => (b.textContent?.length || 0) - (a.textContent?.length || 0));
+
+  return contentBlocks[0] || doc.body;
+}
+
+/**
+ * Remove unwanted elements: scripts, styles, ads, comments, etc.
+ * If excludeNavigation is true, remove navigation blocks.
+ */
+function cleanContent(mainElement: Element, excludeNavigation: boolean) {
+  const removeSelectors = ['script', 'style', 'iframe', 'form', '.advertisement', '#disqus_thread', '.comments', '.social-share'];
+  removeSelectors.forEach(sel => mainElement.querySelectorAll(sel).forEach(e => e.remove()));
+
+  if (excludeNavigation) {
+    const navSelectors = [
+      'nav', '[role="navigation"]', '.navigation', '.menu', '.sidebar', '.toc', 'header', 'footer'
+    ];
+    navSelectors.forEach(sel => mainElement.querySelectorAll(sel).forEach(nav => {
+      // If nav doesn't contain meaningful doc text, remove it outright
+      if (nav.querySelectorAll('p, h1, h2, h3, h4, h5, h6').length === 0) {
+        nav.remove();
+      } else {
+        // If it has some doc content, just mark it
+        nav.innerHTML = '{{ NAVIGATION }}';
+      }
+    }));
+  }
+}
+
+/**
+ * Extract main documentation content as Markdown.
+ */
+export function extractDocumentationContent(html: string, excludeNavigation: boolean): {
+  content: string;
+  title: string;
+  isDocPage: boolean;
+  hierarchy: Record<string, string | null>;
+  anchor: string | null;
+} {
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+  const mainElement = findMainElement(doc);
+  if (!mainElement) {
+    return { content: '', title: '', isDocPage: false, hierarchy: HierarchyUtils.generateEmptyHierarchy(), anchor: null };
+  }
+
+  cleanContent(mainElement, excludeNavigation);
+
+  const title = doc.querySelector('main h1, article h1, h1')?.textContent?.trim() ||
+    doc.querySelector('title')?.textContent?.split('|')[0].trim() ||
+    'Untitled Page';
+
+  const markdown = turndownService.turndown(mainElement.innerHTML);
+  const hierarchy = HierarchyUtils.extractHierarchy(mainElement);
+  const anchor = AnchorExtractor.getAnchor(mainElement);
+
+  // Heuristic: a doc page typically has headings or code blocks or substantial text
+  const isDocPage = Boolean(
+    mainElement.querySelector('h1,h2,h3,h4,h5,h6') ||
+    mainElement.querySelector('pre code') ||
+    (mainElement.textContent?.length || 0) > 500
+  );
+
+  return {
+    content: markdown,
+    title,
+    isDocPage,
+    hierarchy,
+    anchor
+  };
+}
+
+
+// crawler.ts
+import fetch from 'node-fetch';
+import { generateFingerprint, normalizeUrl } from './utils/urlUtils';
+import { extractDocumentationContent } from './utils/contentExtractor';
+
+interface CrawlOptions {
+  maxDepth?: number;
+  includeCodeBlocks?: boolean;   // currently turndown preserves code blocks automatically
+  excludeNavigation?: boolean;
+  followExternalLinks?: boolean;
+  timeout?: number;
+}
+
+interface PageResult {
+  url: string;
+  title: string;
+  content: string;
+  depth: number;
+  parent?: string;
+  hierarchy: Record<string, string | null>;
+  anchor?: string | null;
+  status: 'complete' | 'error';
+  error?: string;
+}
+
+export class DocumentationCrawler {
+  private visited = new Set<string>();
+  private fingerprints = new Set<string>();
+  private queue: { url: string; depth: number; parent?: string }[] = [];
+  private baseUrl: string;
+  private options: Required<CrawlOptions>;
+  private startTime: number;
+  private lastRequestTime = 0;
+  private RATE_LIMIT = 1000;
+
+  constructor(startUrl: string, options: CrawlOptions = {}) {
+    const baseObj = new URL(startUrl);
+    this.baseUrl = baseObj.origin;
+    this.options = {
+      maxDepth: options.maxDepth ?? 5,
+      includeCodeBlocks: options.includeCodeBlocks ?? true,
+      excludeNavigation: options.excludeNavigation ?? true,
+      followExternalLinks: options.followExternalLinks ?? false,
+      timeout: options.timeout ?? 300000,
+    };
+    this.queue.push({ url: startUrl, depth: 0 });
+    this.startTime = Date.now();
+  }
+
+  private isTimeoutReached() {
+    return Date.now() - this.startTime > this.options.timeout;
+  }
+
+  private async rateLimit() {
+    const now = Date.now();
+    const diff = now - this.lastRequestTime;
+    if (diff < this.RATE_LIMIT) {
+      await new Promise(res => setTimeout(res, this.RATE_LIMIT - diff));
+    }
+    this.lastRequestTime = Date.now();
+  }
+
+  private isValidDocumentationUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    const skipPatterns = [
+      '/cdn-cgi/', '/__/', '/wp-admin/', '/wp-content/', '/wp-includes/', 
+      '/assets/', '/static/', '/dist/', '/login', '/signup', '/register', '/account/',
+      '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', '.xml', '.pdf'
+    ];
+    if (skipPatterns.some(p => lower.includes(p))) return false;
+
+    const docPatterns = [
+      '/docs/', '/documentation/', '/guide/', '/reference/', '/manual/', '/learn/',
+      '/tutorial/', '/api/', '/getting-started', '/quickstart', '/introduction'
+    ];
+
+    // If it matches a doc pattern, trust it is doc page.
+    if (docPatterns.some(p => lower.includes(p))) return true;
+
+    // Otherwise at least ensure it has a pathname longer than "/"
+    try {
+      const urlObj = new URL(url);
+      return urlObj.pathname.length > 1;
+    } catch {
+      return false;
+    }
+  }
+
+  private extractLinks(html: string, currentUrl: string, currentDepth: number) {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    const seen = new Set<string>();
+    const results: { url: string; depth: number; parent?: string }[] = [];
+
+    doc.querySelectorAll('a[href]').forEach(a => {
+      if (this.options.excludeNavigation) {
+        const inNav = a.closest('nav, header, footer, [role="navigation"], .navigation, .menu, .nav, .sidebar, .toc');
+        if (inNav) return;
+      }
+
+      const href = a.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+      const normalized = normalizeUrl(href, this.baseUrl, this.options.followExternalLinks);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+
+      if (this.isValidDocumentationUrl(normalized)) {
+        results.push({ url: normalized, depth: currentDepth + 1, parent: currentUrl });
+      }
+    });
+    return results;
+  }
+
+  private async fetchPage(url: string, retries = 3): Promise<string> {
+    await this.rateLimit();
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const response = await fetch(url, { headers: { 'User-Agent': 'Documentation Crawler - Friendly Bot' }});
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        return response.text();
+      } catch (error) {
+        if (attempt === retries - 1) throw error;
+        await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000));
+      }
+    }
+    throw new Error('Failed to fetch after retries');
+  }
+
+  public async *crawl(): AsyncGenerator<PageResult> {
+    while (this.queue.length > 0 && !this.isTimeoutReached()) {
+      const { url, depth, parent } = this.queue.shift()!;
+      if (depth > this.options.maxDepth) continue;
+
+      const fingerprint = generateFingerprint(url, false);
+      if (this.visited.has(fingerprint)) continue;
+      this.visited.add(fingerprint);
+
+      try {
+        const html = await this.fetchPage(url);
+        const newNodes = this.extractLinks(html, url, depth);
+        // Add new nodes at the end (BFS)
+        this.queue.push(...newNodes);
+
+        const { content, title, isDocPage, hierarchy, anchor } = extractDocumentationContent(html, this.options.excludeNavigation);
+        if (!isDocPage) {
+          yield { url, title: title || url, content: '', depth, parent, hierarchy, anchor, status: 'complete' };
+          continue;
+        }
+
+        // Format final output for LLM context:
+        const finalContent = `# ${title}\n\nURL: ${url}\n\n${content}\n`;
+
+        yield {
+          url, title, content: finalContent, depth,
+          parent, hierarchy, anchor, status: 'complete'
+        };
+
+      } catch (error: any) {
+        yield { url, title: url, content: '', depth, parent, hierarchy: HierarchyUtils.generateEmptyHierarchy(), anchor: null, status: 'error', error: error.message };
+      }
+    }
+  }
+}
+
+Additional Notes
+	•	This implementation can be further improved by adding language detection for code blocks, caching responses, and integrating a more advanced navigation removal strategy.
+	•	Consider adding a small summary or metadata block at the top of each page output to help the LLM understand context.
+	•	Token optimization: if content duplicates are found (e.g., identical Markdown blocks), they could be replaced with references or omitted entirely. Currently, this code only avoids re-crawling duplicates, but you could extend it to track content hashes and skip output of duplicates.
+
+This approach and instructions should guide the LLM agent to produce a world-class documentation crawler optimized for LLM consumption.

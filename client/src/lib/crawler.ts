@@ -155,6 +155,18 @@ export class DocumentationCrawler {
     }
   }
 
+  private getLinkContext(element: Element): string {
+    // Get the link text and any title/aria-label
+    const text = element.textContent?.trim() || '';
+    const title = element.getAttribute('title')?.trim() || '';
+    const ariaLabel = element.getAttribute('aria-label')?.trim() || '';
+    
+    // Combine all context, removing duplicates
+    return Array.from(new Set([text, title, ariaLabel]))
+      .filter(Boolean)
+      .join(' - ');
+  }
+
   private extractLinks(html: string, currentUrl: string, currentDepth: number): PageNode[] {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
@@ -196,6 +208,41 @@ export class DocumentationCrawler {
     });
     
     return newNodes;
+  }
+
+  private detectCodeBlockLanguage(element: Element): string | null {
+    // Check class names for language hints
+    const classNames = element.className.split(' ');
+    const languageClasses = classNames.filter(c => 
+      c.startsWith('language-') || 
+      c.startsWith('lang-') || 
+      c.startsWith('highlight-')
+    );
+    
+    if (languageClasses.length > 0) {
+      return languageClasses[0].split('-')[1];
+    }
+    
+    // Look for data attributes
+    const dataLang = element.getAttribute('data-language') || 
+                    element.getAttribute('data-lang');
+    if (dataLang) return dataLang;
+    
+    return null;
+  }
+
+  private optimizeContent(content: string): string {
+    return content
+      // Remove repeated whitespace
+      .replace(/\s+/g, ' ')
+      // Remove repeated newlines
+      .replace(/\n{3,}/g, '\n\n')
+      // Remove empty list items
+      .replace(/^[-*]\s*$/gm, '')
+      // Normalize code block spacing
+      .replace(/```(\w*)\n\n/g, '```$1\n')
+      .replace(/\n\n```/g, '\n```')
+      .trim();
   }
 
   private extractMainContent(html: string): { 
@@ -272,8 +319,24 @@ export class DocumentationCrawler {
       doc.querySelector('title')?.textContent?.split('|')[0]?.trim() ||
       'Untitled Page';
     
+    // Process code blocks before conversion
+    mainElement.querySelectorAll('pre code').forEach(codeBlock => {
+      const lang = this.detectCodeBlockLanguage(codeBlock);
+      if (lang) {
+        codeBlock.setAttribute('class', `language-${lang}`);
+      }
+    });
+
     // Convert to markdown
-    const markdown = turndownService.turndown(mainElement.innerHTML);
+    let markdown = turndownService.turndown(mainElement.innerHTML);
+    
+    // Optimize content
+    markdown = this.optimizeContent(markdown);
+    
+    // Generate fingerprint for deduplication
+    const contentHash = crypto.createHash('sha1')
+      .update(markdown.toLowerCase().replace(/\s+/g, ' '))
+      .digest('hex');
     
     const output = `================================================================
 Documentation Page
@@ -282,6 +345,9 @@ Title: ${title}
 URL: ${mainElement.baseURI || 'Unknown'}
 Type: Documentation
 Format: Markdown
+Content-Hash: ${contentHash}
+Word Count: ${markdown.split(/\s+/).length}
+Has Code: ${mainElement.querySelectorAll('pre code').length > 0 ? 'Yes' : 'No'}
 
 ================================================================
 Content
