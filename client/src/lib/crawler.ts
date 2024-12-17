@@ -340,30 +340,61 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   const dom = new JSDOM(html);
   const doc = dom.window.document;
   
-  // Try to find the main content area with improved selector specificity
-  const mainContent =
-    doc.querySelector('main[role="main"]') ||
-    doc.querySelector('article[role="article"]') ||
-    doc.querySelector('[role="main"]') ||
-    doc.querySelector('main') ||
-    doc.querySelector('article:not(footer article)') ||
-    doc.querySelector('.content:not(.nav-content):not(.footer-content)') ||
-    doc.querySelector('.documentation:not(.nav-documentation)') ||
-    doc.querySelector('[class*="content"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])') ||
-    doc.querySelector('[class*="docs"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])');
+  // First, try to find the main content container using a prioritized list of selectors
+  const mainSelectors = [
+    // Semantic main content containers
+    'main[role="main"]',
+    'article[role="article"]',
+    '[role="main"]',
+    'main',
+    'article:not(footer article)',
     
-  let contentElement = mainContent;
+    // Documentation-specific containers
+    '.documentation-content',
+    '.docs-content',
+    '.markdown-body',
+    '.article-content',
+    
+    // Generic content containers, being more specific to avoid nav/header/footer
+    '.content:not(.nav-content):not(.footer-content)',
+    '.main-content:not(.nav-content)',
+    '[class*="content"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])',
+    '[class*="docs"]:not([class*="nav"]):not([class*="header"]):not([class*="footer"])'
+  ];
+  
+  let contentElement = null;
+  for (const selector of mainSelectors) {
+    contentElement = doc.querySelector(selector);
+    if (contentElement) break;
+  }
+  
+  // If no main content found, look for the most content-rich section
   if (!contentElement) {
-    // If no main content area found, try to find the largest text block
-    const textBlocks = Array.from(doc.querySelectorAll('div, section'))
+    const contentSections = Array.from(doc.querySelectorAll('div, section'))
       .filter(el => {
-        const text = el.textContent || '';
-        return text.length > 500 && // Minimum content length
-               text.split(/[.!?]/).length > 5; // Minimum number of sentences
+        // Must have multiple paragraphs or significant content
+        const hasMultipleParagraphs = el.querySelectorAll('p').length > 1;
+        const hasHeaders = el.querySelector('h1, h2, h3, h4, h5, h6');
+        const hasCodeBlocks = el.querySelector('pre, code');
+        const hasSignificantText = (el.textContent || '').length > 500;
+        
+        return (hasMultipleParagraphs || hasHeaders || hasCodeBlocks) && hasSignificantText;
       })
-      .sort((a, b) => (b.textContent || '').length - (a.textContent || '').length);
+      .sort((a, b) => {
+        // Score sections based on content indicators
+        const score = (el: Element) => {
+          let value = 0;
+          value += (el.querySelectorAll('p').length * 10);
+          value += (el.querySelectorAll('h1, h2, h3, h4, h5, h6').length * 15);
+          value += (el.querySelectorAll('pre, code').length * 20);
+          value += (el.querySelectorAll('ul, ol').length * 5);
+          value += ((el.textContent || '').length / 100);
+          return value;
+        };
+        return score(b) - score(a);
+      });
     
-    contentElement = textBlocks[0] || doc.querySelector('body');
+    contentElement = contentSections[0] || doc.querySelector('body');
   }
   
   if (!contentElement) {
@@ -376,33 +407,61 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   // First pass: identify navigation and common sections
   Array.from(contentElement.querySelectorAll('*')).forEach(section => {
     // Skip text nodes and small elements
-    if (section.nodeType !== 1 || section.textContent?.length < 100) return;
+    if (section.nodeType !== 1) return;
     
-    // Check if this is a navigation element
-    const isNavigation = 
+    // Only process elements that look like structural containers
+    const isContainer = 
+      section instanceof HTMLElement && 
+      (section.tagName === 'DIV' || 
+       section.tagName === 'NAV' ||
+       section.tagName === 'HEADER' ||
+       section.tagName === 'FOOTER' ||
+       section.tagName === 'ASIDE' ||
+       section.tagName === 'SECTION');
+    
+    if (!isContainer) return;
+
+    // Check if this is definitely a navigation element
+    const isDefinitelyNavigation = 
       section.tagName === 'NAV' ||
-      section.tagName === 'HEADER' ||
-      section.tagName === 'FOOTER' ||
-      section.hasAttribute('role') && section.getAttribute('role') === 'navigation' ||
-      section.classList.contains('navigation') ||
-      section.classList.contains('nav') ||
-      section.classList.contains('menu') ||
-      section.classList.contains('sidebar');
-    
-    if (isNavigation) {
+      section.getAttribute('role') === 'navigation' ||
+      (section.className && /\b(navigation|navbar|nav-menu|main-nav)\b/i.test(section.className));
+
+    if (isDefinitelyNavigation) {
       navigationSections.add(section);
+      section.innerHTML = '{{ NAVIGATION }}';
       return;
     }
-    
-    // Check for common patterns in larger sections
-    if (section.textContent.length > 500) {
-      for (const [type, { patterns, placeholder }] of Object.entries(commonSections)) {
-        if (patterns.some(pattern => pattern.test(section.innerHTML))) {
-          navigationSections.add(section);
-          section.innerHTML = `\n${placeholder}\n`;
-          return;
-        }
-      }
+
+    // For other elements, check content characteristics
+    const hasContentValue = 
+      section.querySelector('p, pre, code, h1, h2, h3, h4, h5, h6') ||
+      (section.textContent?.trim().length || 0) > 200;
+
+    const looksLikeNavigation = 
+      section.querySelectorAll('a').length > 5 &&
+      !hasContentValue &&
+      (
+        /\b(menu|nav|sidebar|toc|contents)\b/i.test(section.className || '') ||
+        /\b(menu|nav|sidebar|toc|contents)\b/i.test(section.id || '') ||
+        section.querySelector('.menu, .nav, .sidebar, .toc, .contents')
+      );
+
+    if (looksLikeNavigation) {
+      navigationSections.add(section);
+      section.innerHTML = '{{ NAVIGATION }}';
+      return;
+    }
+
+    // Check for footer-like sections
+    const isFooter = 
+      section.tagName === 'FOOTER' ||
+      (section.className && /\b(footer|bottom|copyright)\b/i.test(section.className));
+
+    if (isFooter && !hasContentValue) {
+      navigationSections.add(section);
+      section.innerHTML = '{{ FOOTER }}';
+      return;
     }
   });
   
@@ -416,46 +475,56 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
     }
   });
 
-  // More targeted list of elements to remove
+  // Remove definitely non-content elements first
   const removeSelectors = [
-    // Technical elements that never contain content
+    // Technical elements
     'style', 'script', 'noscript', 'link', 'meta',
     
-    // Promotional and tracking elements
+    // Ads and tracking
     '[id*="google_ads"]', '[id*="carbonads"]',
     '[data-analytics]', '[class*="tracking"]',
     '.advertisement', '.sponsored-content',
     
-    // Interactive elements that aren't documentation
+    // Social and interactive
     '.share-buttons', '.social-share',
     '.comments-section', '.feedback-form',
-    
-    // Navigation elements that were already processed
-    ':not(main):not(article) > nav',
-    ':not(main):not(article) > header:not(:first-child)',
-    'footer:not(:has(> p, > pre, > code))',
-    
-    // Only remove navigation if it's clearly marked
-    '[role="navigation"]:not(:has(article, p))',
-    '.navigation:not(:has(article, p))',
-    '.menu:not(:has(article, p))',
-    
-    // Only remove sidebar content without meaningful content
-    'aside:not(:has(p, pre, code, h1, h2, h3, h4, h5, h6))',
-    '[role="complementary"]:not(:has(p, pre, code, h1, h2, h3, h4, h5, h6))',
-    
-    // Utility elements that don't contain documentation
-    '.toolbar:not(:has(pre, code))',
-    '.utility:not(:has(pre, code))',
-    
-    // Keep any element that contains significant content
-    ':not(:has(p, pre, code, h1, h2, h3, h4, h5, h6)) > .toc',
-    ':not(:has(p, pre, code, h1, h2, h3, h4, h5, h6)) > .table-of-contents'
   ];
 
-  // Remove non-content elements
   removeSelectors.forEach(selector => {
     contentElement.querySelectorAll(selector).forEach(el => el.remove());
+  });
+
+  // Clean up remaining elements
+  Array.from(contentElement.querySelectorAll('*')).forEach(el => {
+    if (!(el instanceof HTMLElement)) return;
+
+    // Keep elements that definitely contain content
+    const hasContent = 
+      el.querySelector('p, pre, code, h1, h2, h3, h4, h5, h6, img, table') ||
+      (el.tagName === 'P' && el.textContent?.trim()) ||
+      (el.tagName === 'PRE' && el.textContent?.trim()) ||
+      (el.tagName === 'CODE' && el.textContent?.trim()) ||
+      (/^H[1-6]$/.test(el.tagName) && el.textContent?.trim());
+
+    // Remove empty or purely decorative elements
+    const isEmpty = !el.textContent?.trim() && !hasContent;
+    const isPurelyDecorative = 
+      el.getAttribute('aria-hidden') === 'true' ||
+      el.getAttribute('role') === 'presentation' ||
+      (el.className && /\b(decorative|icon|separator|spacer)\b/i.test(el.className));
+
+    if (isEmpty || isPurelyDecorative) {
+      el.remove();
+      return;
+    }
+
+    // Clean up attributes, keeping only essential ones
+    const keepAttributes = ['href', 'src', 'alt', 'title', 'lang', 'id'];
+    Array.from(el.attributes).forEach(attr => {
+      if (!keepAttributes.includes(attr.name)) {
+        el.removeAttribute(attr.name);
+      }
+    });
   });
 
   // Clean up elements and handle link whitespace
