@@ -101,13 +101,32 @@ export class DocumentationCrawler {
 
   private normalizeUrl(url: string): string {
     try {
+      // Handle relative URLs and normalize them
       const parsed = new URL(url, this.baseUrl);
+      
       // Remove hash and search params
       parsed.hash = '';
       parsed.search = '';
-      return parsed.toString().replace(/\/$/, '');
+      
+      // Normalize pathname (remove trailing slash and normalize case)
+      parsed.pathname = parsed.pathname.replace(/\/$/, '').toLowerCase();
+      
+      // For absolute URLs, ensure they're in the same domain
+      if (!this.options.followExternalLinks && parsed.origin !== this.baseUrl) {
+        return '';
+      }
+      
+      return parsed.toString();
     } catch {
       return '';
+    }
+  }
+
+  private isSameDomain(url: string): boolean {
+    try {
+      return new URL(url).origin === new URL(this.baseUrl).origin;
+    } catch {
+      return false;
     }
   }
 
@@ -168,39 +187,35 @@ export class DocumentationCrawler {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     
-    // Get all links, excluding navigation elements
-    return Array.from(doc.querySelectorAll('a[href]'))
-      .filter(a => {
-        // Skip navigation links
-        if (this.options.excludeNavigation) {
-          const isInNav = 
-            a.closest('nav') ||
-            a.closest('header') ||
-            a.closest('footer') ||
-            a.closest('[role="navigation"]') ||
-            a.closest('.navigation') ||
-            a.closest('.menu') ||
-            a.closest('.nav');
-          
-          if (isInNav) return false;
-        }
-        
-        return true;
-      })
-      .map(a => {
-        const href = a.getAttribute('href');
-        if (!href) return null;
-        
-        try {
-          return this.normalizeUrl(href);
-        } catch {
-          return null;
-        }
-      })
-      .filter((url): url is string => {
-        if (!url) return false;
-        return this.isValidDocumentationUrl(url);
-      });
+    // Get all links
+    const links = new Set<string>();
+    
+    // Process all anchor tags
+    Array.from(doc.querySelectorAll('a[href]')).forEach(a => {
+      // Skip navigation links if configured
+      if (this.options.excludeNavigation) {
+        const isInNav = 
+          a.closest('nav, header, footer, [role="navigation"], .navigation, .menu, .nav, .sidebar, .toc');
+        if (isInNav) return;
+      }
+      
+      const href = a.getAttribute('href');
+      if (!href) return;
+      
+      // Skip anchors and javascript links
+      if (href.startsWith('#') || href.startsWith('javascript:')) return;
+      
+      // Normalize the URL
+      const normalizedUrl = this.normalizeUrl(href);
+      if (!normalizedUrl) return;
+      
+      // Apply documentation-specific filtering
+      if (this.isValidDocumentationUrl(normalizedUrl)) {
+        links.add(normalizedUrl);
+      }
+    });
+    
+    return Array.from(links);
   }
 
   private generateContentHash(content: string): string {
@@ -323,20 +338,44 @@ ${markdown}
   }
 
   public async *crawl() {
+    const processingQueue = new Set<string>();
+    
     while (this.queue.length > 0 && this.visited.size < this.options.maxPages) {
       const url = this.queue.shift()!;
       const normalizedUrl = this.normalizeUrl(url);
       
-      // Skip if already visited
-      if (this.visited.has(normalizedUrl)) {
+      // Skip invalid URLs
+      if (!normalizedUrl) continue;
+      
+      // Skip if already visited or currently processing
+      if (this.visited.has(normalizedUrl) || processingQueue.has(normalizedUrl)) {
         continue;
       }
       
+      // Mark as being processed
+      processingQueue.add(normalizedUrl);
+      
       try {
         const html = await this.fetchPage(url);
+        
+        // Extract and queue new links before processing content
+        // This ensures we discover links even if content processing fails
+        const newLinks = this.extractLinks(html, url)
+          .filter(link => {
+            const normalized = this.normalizeUrl(link);
+            return normalized && 
+                   !this.visited.has(normalized) && 
+                   !processingQueue.has(normalized);
+          });
+        
+        // Add new links to the beginning of the queue for breadth-first traversal
+        this.queue.unshift(...newLinks);
+        
+        // Process the content
         const { content, title, isDocPage } = this.extractMainContent(html);
         
         if (!isDocPage) {
+          processingQueue.delete(normalizedUrl);
           continue;
         }
         
@@ -348,6 +387,7 @@ ${markdown}
           .some(page => page.contentHash === contentHash);
         
         if (isDuplicate) {
+          processingQueue.delete(normalizedUrl);
           continue;
         }
         
@@ -357,12 +397,6 @@ ${markdown}
           contentHash,
           title
         });
-        
-        // Extract and queue new links
-        const newLinks = this.extractLinks(html, url)
-          .filter(link => !this.visited.has(this.normalizeUrl(link)));
-        
-        this.queue.push(...newLinks);
         
         // Yield the processed page
         yield {
@@ -380,6 +414,8 @@ ${markdown}
           status: "error",
           error: error.message
         };
+      } finally {
+        processingQueue.delete(normalizedUrl);
       }
     }
   }
