@@ -118,8 +118,10 @@ export default function Home() {
         title: "Error",
         description: error.message,
         variant: "destructive",
+        duration: 5000,
       });
       setResults([]);
+      setUrl("");
     },
   });
 

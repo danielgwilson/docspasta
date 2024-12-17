@@ -31,7 +31,7 @@ export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: 
     return parsed.toString();
   } catch (error) {
     console.error('Failed to parse URL:', url, error);
-    throw new Error(`Invalid URL: ${url}`);
+    throw new Error(`Failed to parse URL: ${url}. Please make sure you entered a valid URL.`);
   }
 }
 
