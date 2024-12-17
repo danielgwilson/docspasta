@@ -6,18 +6,32 @@ import crypto from 'crypto';
  */
 export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: boolean): string {
   try {
-    const parsed = new URL(url, baseUrl);
+    // Ensure URL has a protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    
+    const parsed = new URL(url);
     parsed.hash = '';
     parsed.search = '';
     parsed.pathname = parsed.pathname.replace(/\/$/, '').toLowerCase();
     
-    if (!followExternalLinks && parsed.origin !== new URL(baseUrl).origin) {
-      return '';
+    // Only check external links if we have a baseUrl
+    if (baseUrl && !followExternalLinks) {
+      try {
+        const baseUrlParsed = new URL(baseUrl);
+        if (parsed.origin !== baseUrlParsed.origin) {
+          return '';
+        }
+      } catch {
+        // If baseUrl is invalid, continue with the original URL
+      }
     }
     
     return parsed.toString();
-  } catch {
-    return '';
+  } catch (error) {
+    console.error('Failed to parse URL:', url, error);
+    throw new Error(`Invalid URL: ${url}`);
   }
 }
 
