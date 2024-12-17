@@ -162,12 +162,13 @@ export class DocumentationCrawler {
       }
 
       const fingerprint = generateFingerprint(url, false);
-      if (this.visited.has(fingerprint)) {
+      if (this.visited.has(fingerprint) || this.fingerprints.has(fingerprint)) {
         console.debug(`[Crawler] Skipping ${url} - Already visited`);
         continue;
       }
 
       this.visited.add(fingerprint);
+      this.fingerprints.add(fingerprint);
       
       try {
         const html = await this.fetchPage(url);

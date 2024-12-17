@@ -68,7 +68,8 @@ export function isValidDocumentationUrl(url: string): boolean {
   
   try {
     const urlObj = new URL(url);
-    return urlObj.pathname.length > 1;
+    // Always allow the initial URL and its direct children
+  return urlObj.pathname.length > 0;
   } catch {
     return false;
   }
