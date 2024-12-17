@@ -88,9 +88,10 @@ export function registerRoutes(app: Express) {
       });
 
       let processedCount = 0;
-      let totalFound = 0;
+      let totalFound = 1; // Start with 1 for the initial URL
+      let isFinished = false;
 
-      // Send initial status
+      // Send status updates
       const sendStatus = (type: string, data: any = {}) => {
         if (!res.closed) {
           res.write(`data: ${JSON.stringify({ 
@@ -105,31 +106,59 @@ export function registerRoutes(app: Express) {
         }
       };
 
+      // Send initial status
       sendStatus('status');
 
       // Handle client disconnect
+      let isClosed = false;
       req.on('close', () => {
-        res.end();
+        isClosed = true;
       });
 
+      // Process pages
       try {
         for await (const result of crawler.crawl()) {
+          if (isClosed) break;
+
           if (result.status === "complete") {
             processedCount++;
-            totalFound = Math.max(totalFound, processedCount);
+            results.push(result);
+            sendStatus('progress', { result });
+          } else if (result.status === "error") {
+            console.error('Page processing error:', result.error);
+            sendStatus('warning', { 
+              message: `Failed to process ${result.url}: ${result.error}` 
+            });
           }
-          
-          results.push(result);
-          sendStatus('progress', { result });
+
+          // Update total count based on discovered links
+          if (result.newLinksFound) {
+            totalFound += result.newLinksFound;
+          }
         }
 
-        sendStatus('complete', { results });
+        isFinished = true;
+        if (!isClosed) {
+          sendStatus('complete', { 
+            results,
+            summary: {
+              totalProcessed: processedCount,
+              totalPages: results.length,
+              timeElapsed: Date.now() - crawler.startTime
+            }
+          });
+        }
       } catch (error: any) {
         console.error('Crawl iteration error:', error);
-        sendStatus('error', { error: error.message });
+        if (!isClosed) {
+          sendStatus('error', { error: error.message });
+        }
       }
 
-      res.end();
+      // Only end the response if we finished normally
+      if (isFinished && !isClosed) {
+        res.end();
+      }
     } catch (error: any) {
       console.error('Crawl initialization error:', error);
       if (!res.headersSent) {

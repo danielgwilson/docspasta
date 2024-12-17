@@ -20,6 +20,7 @@ export interface PageResult {
   anchor?: string | null;
   status: 'complete' | 'error';
   error?: string;
+  newLinksFound?: number;
 }
 
 export interface PageNode {

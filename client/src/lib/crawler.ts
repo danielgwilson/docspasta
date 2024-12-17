@@ -23,7 +23,7 @@ export class DocumentationCrawler {
   private queue: PageNode[] = [];
   private baseUrl: string;
   private options: ValidatedCrawlerOptions;
-  private startTime: number;
+  public readonly startTime: number;
   private lastRequestTime = 0;
   private activeRequests = 0;
 
@@ -176,8 +176,15 @@ export class DocumentationCrawler {
         
         // Extract new links before cleaning content
         const newNodes = this.extractLinks(doc, url, depth);
-        this.queue.push(...newNodes);
-        console.debug(`[Crawler] Found ${newNodes.length} new links on ${url}`);
+        let newLinksCount = 0;
+        for (const node of newNodes) {
+          const fingerprint = generateFingerprint(node.url, false);
+          if (!this.fingerprints.has(fingerprint)) {
+            this.queue.push(node);
+            newLinksCount++;
+          }
+        }
+        console.debug(`[Crawler] Found ${newLinksCount} new links on ${url}`);
 
         const mainElement = this.findMainElement(doc);
         if (!mainElement) {
@@ -230,7 +237,8 @@ export class DocumentationCrawler {
           parent,
           hierarchy,
           anchor,
-          status: "complete"
+          status: "complete",
+          newLinksFound: newLinksCount
         };
         
       } catch (error) {
