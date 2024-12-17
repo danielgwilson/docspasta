@@ -84,10 +84,14 @@ export class DocumentationCrawler {
   private async fetchPage(url: string, retries = 3): Promise<string> {
     await this.rateLimit();
     
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         const response = await fetch(url, {
-          headers: { 'User-Agent': 'Documentation Crawler - Friendly Bot' }
+          headers: { 'User-Agent': 'Documentation Crawler - Friendly Bot' },
+          signal: controller.signal
         });
         
         if (!response.ok) {
