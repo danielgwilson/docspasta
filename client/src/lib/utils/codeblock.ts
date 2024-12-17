@@ -1,3 +1,6 @@
+import { JSDOM } from 'jsdom';
+const { Element } = new JSDOM('').window;
+
 /**
  * Utility class for handling code block detection and language inference
  */

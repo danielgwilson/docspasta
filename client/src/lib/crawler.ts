@@ -123,62 +123,68 @@ export class DocumentationCrawler {
     const processingQueue = new Set<string>();
     
     while (this.queue.length > 0 && !this.isTimeoutReached()) {
-      const { url, depth, parent } = this.queue.shift()!;
-      
-      if (depth > this.options.maxDepth) {
-        this.logDebug(`Skipping ${url} - Max depth exceeded`);
-        continue;
-      }
-      
-      const fingerprint = generateFingerprint(url, false);
-      if (this.fingerprints.has(fingerprint) || processingQueue.has(url)) {
-        continue;
-      }
-      
-      this.fingerprints.add(fingerprint);
-      processingQueue.add(url);
-      
       try {
-        const html = await this.fetchPage(url);
-        const newNodes = this.extractLinks(html, url, depth);
-        this.queue.push(...newNodes);
+        const { url, depth, parent } = this.queue.shift()!;
         
-        const contentResult = await this.processContent(html, url);
-        const { content, title, hierarchy, anchor, contentHash } = contentResult;
-        
-        if (!contentResult.isDocPage || this.contentHashes.has(contentHash)) {
-          this.logDebug(`Skipping ${url} - ${!contentResult.isDocPage ? 'Not a doc page' : 'Duplicate content'}`);
+        if (depth > this.options.maxDepth) {
+          this.logDebug(`Skipping ${url} - Max depth exceeded`);
           continue;
         }
         
-        this.contentHashes.add(contentHash);
+        const fingerprint = generateFingerprint(url, false);
+        if (this.fingerprints.has(fingerprint) || processingQueue.has(url)) {
+          continue;
+        }
         
-        yield {
-          url,
-          title,
-          content,
-          depth,
-          parent,
-          hierarchy,
-          anchor,
-          status: "complete"
-        };
+        this.fingerprints.add(fingerprint);
+        processingQueue.add(url);
         
-      } catch (error: any) {
-        this.logError(`Failed to process ${url}`, error);
-        yield {
-          url,
-          title: url,
-          content: "",
-          depth,
-          parent,
-          hierarchy: Hierarchy.generateEmptyHierarchy(),
-          status: "error",
-          error: error.message
-        };
+        try {
+          const html = await this.fetchPage(url);
+          const newNodes = this.extractLinks(html, url, depth);
+          this.queue.push(...newNodes);
+          
+          const contentResult = await this.processContent(html, url);
+          const { content, title, isDocPage, hierarchy, anchor, contentHash } = contentResult;
+          
+          if (!isDocPage || this.contentHashes.has(contentHash)) {
+            this.logDebug(`Skipping ${url} - ${!isDocPage ? 'Not a doc page' : 'Duplicate content'}`);
+            continue;
+          }
+          
+          this.contentHashes.add(contentHash);
+          
+          yield {
+            url,
+            title,
+            content,
+            depth,
+            parent,
+            hierarchy,
+            anchor,
+            status: "complete"
+          };
+        } catch (error) {
+          this.logError(`Failed to process page: ${url}`, error as Error);
+          yield {
+            url,
+            title: url,
+            content: "",
+            depth,
+            parent,
+            hierarchy: Hierarchy.generateEmptyHierarchy(),
+            status: "error",
+            error: (error as Error).message
+          };
+        }
+      } catch (error) {
+        this.logError('Unexpected error during crawl', error as Error);
       } finally {
-        processingQueue.delete(url);
-        this.activeRequests--;
+        const currentUrl = this.queue[0]?.url;
+        if (currentUrl) {
+          processingQueue.delete(currentUrl);
+          this.activeRequests--;
+        }
       }
     }
   }
@@ -187,7 +193,7 @@ export class DocumentationCrawler {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     const mainElement = this.findMainElement(doc);
-
+    
     if (!mainElement) {
       return {
         content: '',
@@ -201,7 +207,6 @@ export class DocumentationCrawler {
 
     this.cleanContent(mainElement);
     
-    // Process code blocks before conversion
     CodeBlockHandler.processCodeBlocks(mainElement);
     
     const title = this.extractTitle(doc);
