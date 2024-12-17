@@ -1,5 +1,6 @@
 import { JSDOM } from 'jsdom';
 import TurndownService from 'turndown';
+import crypto from 'crypto';
 
 // Initialize Turndown for Markdown conversion
 const turndownService = new TurndownService({
@@ -23,80 +24,70 @@ async function rateLimit() {
   lastRequestTime = Date.now();
 }
 
-// Documentation URL patterns
-const DOC_PATTERNS = [
-  '/docs/',
-  '/documentation/',
-  '/guide/',
-  '/reference/',
-  '/manual/',
-  '/learn/',
-  '/tutorial/',
-  '/api/',
-  '/getting-started',
-  '/quickstart',
-  '/introduction',
-];
-
-// URL patterns to skip
-const SKIP_PATTERNS = [
-  // Infrastructure and system paths
-  '/cdn-cgi/',
-  '/__/',
-  '/wp-admin/',
-  '/wp-content/',
-  '/wp-includes/',
-  '/assets/',
-  '/static/',
-  '/dist/',
-  '/build/',
-  
-  // Authentication and user pages
-  '/login',
-  '/signup',
-  '/register',
-  '/account/',
-  '/profile/',
-  
-  // Media files
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.gif',
-  '.css',
-  '.js',
-  '.xml',
-  '.pdf',
-];
-
 interface CrawlOptions {
-  maxPages?: number;
+  maxDepth?: number;
   includeCodeBlocks?: boolean;
   excludeNavigation?: boolean;
   followExternalLinks?: boolean;
+  timeout?: number;
 }
 
 interface VisitedPage {
   url: string;
-  contentHash: string;
+  fingerprint: string;
+  depth: number;
   title: string;
+  parent?: string;
+}
+
+interface PageNode {
+  url: string;
+  depth: number;
+  parent?: string;
 }
 
 export class DocumentationCrawler {
   private visited = new Map<string, VisitedPage>();
-  private queue: string[] = [];
+  private fingerprints = new Set<string>();
+  private schemeFingerprints = new Set<string>();
+  private queue: PageNode[] = [];
   private baseUrl: string;
   private options: Required<CrawlOptions>;
+  private startTime: number;
 
   constructor(startUrl: string, options: CrawlOptions = {}) {
     this.baseUrl = new URL(startUrl).origin;
     this.options = {
-      maxPages: options.maxPages ?? 20,
+      maxDepth: options.maxDepth ?? 5,
       includeCodeBlocks: options.includeCodeBlocks ?? true,
       excludeNavigation: options.excludeNavigation ?? true,
       followExternalLinks: options.followExternalLinks ?? false,
+      timeout: options.timeout ?? 300000, // 5 minutes default
     };
-    this.queue.push(startUrl);
+    this.queue.push({ url: startUrl, depth: 0 });
+    this.startTime = Date.now();
+  }
+
+  private isTimeoutReached(): boolean {
+    return Date.now() - this.startTime > this.options.timeout;
+  }
+
+  private generateFingerprint(url: string, includeScheme = true): string {
+    // Remove query parameters and fragments
+    const normalizedUrl = new URL(url);
+    normalizedUrl.search = '';
+    normalizedUrl.hash = '';
+    
+    let urlForFingerprint = normalizedUrl.toString();
+    
+    // Make scheme-agnostic if requested
+    if (!includeScheme) {
+      urlForFingerprint = urlForFingerprint.replace(/^(https?):\/\//, '');
+    }
+    
+    return crypto.createHash('sha1')
+      .update(urlForFingerprint)
+      .digest('hex');
   }
 
   private normalizeUrl(url: string): string {
@@ -108,10 +99,10 @@ export class DocumentationCrawler {
       parsed.hash = '';
       parsed.search = '';
       
-      // Normalize pathname (remove trailing slash and normalize case)
+      // Normalize pathname
       parsed.pathname = parsed.pathname.replace(/\/$/, '').toLowerCase();
       
-      // For absolute URLs, ensure they're in the same domain
+      // External link handling
       if (!this.options.followExternalLinks && parsed.origin !== this.baseUrl) {
         return '';
       }
@@ -122,14 +113,258 @@ export class DocumentationCrawler {
     }
   }
 
-  private isSameDomain(url: string): boolean {
+  private isValidDocumentationUrl(url: string): boolean {
+    const normalized = url.toLowerCase();
+    
+    // Skip obvious non-documentation URLs
+    const skipPatterns = [
+      '/cdn-cgi/', '/__/', '/wp-admin/', '/wp-content/',
+      '/wp-includes/', '/assets/', '/static/', '/dist/',
+      '/login', '/signup', '/register', '/account/',
+      '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', '.xml', '.pdf'
+    ];
+    
+    if (skipPatterns.some(pattern => normalized.includes(pattern))) {
+      return false;
+    }
+    
+    // Prioritize documentation URLs
+    const docPatterns = [
+      '/docs/', '/documentation/', '/guide/', '/reference/',
+      '/manual/', '/learn/', '/tutorial/', '/api/',
+      '/getting-started', '/quickstart', '/introduction'
+    ];
+    
+    // Always allow documentation paths
+    if (docPatterns.some(pattern => normalized.includes(pattern))) {
+      return true;
+    }
+    
+    // Additional validation
     try {
-      return new URL(url).origin === new URL(this.baseUrl).origin;
+      const urlObj = new URL(url);
+      return urlObj.pathname.length > 1; // At least some path
     } catch {
       return false;
     }
   }
 
+  private extractLinks(html: string, currentUrl: string, currentDepth: number): PageNode[] {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    
+    const newNodes: PageNode[] = [];
+    const seenUrls = new Set<string>();
+    
+    // Process all anchor tags
+    Array.from(doc.querySelectorAll('a[href]')).forEach(a => {
+      // Skip navigation links if configured
+      if (this.options.excludeNavigation) {
+        const isInNav = a.closest(
+          'nav, header, footer, [role="navigation"], ' +
+          '.navigation, .menu, .nav, .sidebar, .toc'
+        );
+        if (isInNav) return;
+      }
+      
+      const href = a.getAttribute('href');
+      if (!href) return;
+      
+      // Skip anchors and javascript links
+      if (href.startsWith('#') || href.startsWith('javascript:')) return;
+      
+      // Normalize URL
+      const normalizedUrl = this.normalizeUrl(href);
+      if (!normalizedUrl || seenUrls.has(normalizedUrl)) return;
+      
+      seenUrls.add(normalizedUrl);
+      
+      // Check if URL is valid for crawling
+      if (this.isValidDocumentationUrl(normalizedUrl)) {
+        newNodes.push({
+          url: normalizedUrl,
+          depth: currentDepth + 1,
+          parent: currentUrl
+        });
+      }
+    });
+    
+    return newNodes;
+  }
+
+  private extractMainContent(html: string): { content: string, title: string, isDocPage: boolean } {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    
+    // Find main content container
+    const selectors = [
+      'article[role="main"]', 'main[role="main"]',
+      'div[role="main"]', 'main', 'article',
+      '.content', '.article-content', '.markdown-body',
+      '#content', '#main'
+    ];
+    
+    let mainElement = null;
+    
+    // Try each selector
+    for (const selector of selectors) {
+      const element = doc.querySelector(selector);
+      if (element && element.textContent?.trim()) {
+        mainElement = element;
+        break;
+      }
+    }
+    
+    // Fallback to largest content block
+    if (!mainElement) {
+      const contentBlocks = Array.from(doc.querySelectorAll('div, section'))
+        .filter(el => {
+          const text = el.textContent || '';
+          const hasParagraphs = el.querySelectorAll('p').length > 0;
+          const hasHeaders = el.querySelectorAll('h1, h2, h3, h4, h5, h6').length > 0;
+          return text.length > 200 && (hasParagraphs || hasHeaders);
+        })
+        .sort((a, b) => (b.textContent?.length || 0) - (a.textContent?.length || 0));
+      
+      mainElement = contentBlocks[0] || doc.body;
+    }
+    
+    if (!mainElement) {
+      return { content: '', title: '', isDocPage: false };
+    }
+    
+    // Clean up content
+    const removeSelectors = [
+      'script', 'style', 'iframe', 'form',
+      '.advertisement', '#disqus_thread',
+      '.comments', '.social-share'
+    ];
+    
+    removeSelectors.forEach(selector => {
+      mainElement?.querySelectorAll(selector).forEach(el => el.remove());
+    });
+    
+    // Handle navigation
+    if (this.options.excludeNavigation) {
+      mainElement.querySelectorAll('nav, [role="navigation"], .navigation, .menu').forEach(nav => {
+        if (nav.querySelectorAll('p, h1, h2, h3, h4, h5, h6').length === 0) {
+          nav.innerHTML = '{{ NAVIGATION }}';
+        }
+      });
+    }
+    
+    // Extract title
+    const title = 
+      doc.querySelector('main h1, article h1')?.textContent ||
+      doc.querySelector('h1')?.textContent ||
+      doc.querySelector('title')?.textContent?.split('|')[0]?.trim() ||
+      'Untitled Page';
+    
+    // Convert to markdown
+    const markdown = turndownService.turndown(mainElement.innerHTML);
+    
+    const output = `================================================================
+Documentation Page
+================================================================
+Title: ${title}
+URL: ${mainElement.baseURI || 'Unknown'}
+Type: Documentation
+Format: Markdown
+
+================================================================
+Content
+================================================================
+
+${markdown}
+
+================================================================`;
+    
+    const isDocPage = Boolean(
+      mainElement.querySelector('h1, h2, h3') ||
+      mainElement.querySelector('pre code') ||
+      (mainElement.textContent?.length || 0) > 500
+    );
+    
+    return { content: output, title, isDocPage };
+  }
+
+  public async *crawl() {
+    const processingQueue = new Set<string>();
+    
+    while (this.queue.length > 0 && !this.isTimeoutReached()) {
+      const node = this.queue.shift()!;
+      const { url, depth, parent } = node;
+      
+      // Skip if depth exceeded
+      if (depth > this.options.maxDepth) {
+        continue;
+      }
+      
+      // Generate fingerprints for deduplication
+      const fingerprint = this.generateFingerprint(url, false);
+      const schemeFingerprint = this.generateFingerprint(url, true);
+      
+      // Skip if already seen (either scheme-agnostic or scheme-specific)
+      if (this.fingerprints.has(fingerprint) || processingQueue.has(url)) {
+        continue;
+      }
+      
+      // Track both fingerprints
+      this.fingerprints.add(fingerprint);
+      this.schemeFingerprints.add(schemeFingerprint);
+      processingQueue.add(url);
+      
+      try {
+        const html = await this.fetchPage(url);
+        
+        // Extract new links before processing content
+        const newNodes = this.extractLinks(html, url, depth);
+        
+        // Add new nodes to the beginning for breadth-first traversal
+        this.queue.unshift(...newNodes);
+        
+        // Process content
+        const { content, title, isDocPage } = this.extractMainContent(html);
+        
+        if (!isDocPage) {
+          continue;
+        }
+        
+        // Store the visited page
+        this.visited.set(url, {
+          url,
+          fingerprint,
+          depth,
+          title,
+          parent
+        });
+        
+        // Yield the processed page
+        yield {
+          url,
+          title,
+          content,
+          depth,
+          parent,
+          status: "complete"
+        };
+        
+      } catch (error: any) {
+        yield {
+          url,
+          title: url,
+          content: "",
+          depth,
+          parent,
+          status: "error",
+          error: error.message
+        };
+      } finally {
+        processingQueue.delete(url);
+      }
+    }
+  }
+  
   private async fetchPage(url: string, retries = 3): Promise<string> {
     await rateLimit();
     
@@ -153,270 +388,5 @@ export class DocumentationCrawler {
     }
     
     throw new Error('Failed to fetch page after multiple retries');
-  }
-
-  private isValidDocumentationUrl(url: string): boolean {
-    const normalized = url.toLowerCase();
-    
-    // Skip if matches any skip patterns
-    if (SKIP_PATTERNS.some(pattern => normalized.includes(pattern))) {
-      return false;
-    }
-    
-    // Always allow if matches documentation patterns
-    if (DOC_PATTERNS.some(pattern => normalized.includes(pattern))) {
-      return true;
-    }
-    
-    // Additional validation for non-doc-pattern URLs
-    try {
-      const urlObj = new URL(url);
-      
-      // Only allow same domain unless followExternalLinks is true
-      if (!this.options.followExternalLinks && urlObj.hostname !== new URL(this.baseUrl).hostname) {
-        return false;
-      }
-      
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private extractLinks(html: string, baseUrl: string): string[] {
-    const dom = new JSDOM(html);
-    const doc = dom.window.document;
-    
-    // Get all links
-    const links = new Set<string>();
-    
-    // Process all anchor tags
-    Array.from(doc.querySelectorAll('a[href]')).forEach(a => {
-      // Skip navigation links if configured
-      if (this.options.excludeNavigation) {
-        const isInNav = 
-          a.closest('nav, header, footer, [role="navigation"], .navigation, .menu, .nav, .sidebar, .toc');
-        if (isInNav) return;
-      }
-      
-      const href = a.getAttribute('href');
-      if (!href) return;
-      
-      // Skip anchors and javascript links
-      if (href.startsWith('#') || href.startsWith('javascript:')) return;
-      
-      // Normalize the URL
-      const normalizedUrl = this.normalizeUrl(href);
-      if (!normalizedUrl) return;
-      
-      // Apply documentation-specific filtering
-      if (this.isValidDocumentationUrl(normalizedUrl)) {
-        links.add(normalizedUrl);
-      }
-    });
-    
-    return Array.from(links);
-  }
-
-  private generateContentHash(content: string): string {
-    // Create a simple hash of the content to detect duplicates
-    // This ignores whitespace and case to catch near-duplicates
-    return content
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 100); // Use first 100 chars for hash
-  }
-
-  private extractMainContent(html: string): { content: string, title: string, isDocPage: boolean } {
-    const dom = new JSDOM(html);
-    const doc = dom.window.document;
-    
-    // Try to find the main content container
-    const selectors = [
-      'article[role="main"]',
-      'main[role="main"]',
-      'div[role="main"]',
-      'main',
-      'article',
-      '.content',
-      '.article-content',
-      '.markdown-body',
-      '#content',
-      '#main'
-    ];
-    
-    let mainElement = null;
-    
-    // Try each selector
-    for (const selector of selectors) {
-      const element = doc.querySelector(selector);
-      if (element && element.textContent?.trim()) {
-        mainElement = element;
-        break;
-      }
-    }
-    
-    // If no main content found, look for the largest content block
-    if (!mainElement) {
-      const contentBlocks = Array.from(doc.querySelectorAll('div, section'))
-        .filter(el => {
-          const text = el.textContent || '';
-          const hasParagraphs = el.querySelectorAll('p').length > 0;
-          const hasHeaders = el.querySelectorAll('h1, h2, h3, h4, h5, h6').length > 0;
-          return text.length > 200 && (hasParagraphs || hasHeaders);
-        })
-        .sort((a, b) => (b.textContent?.length || 0) - (a.textContent?.length || 0));
-      
-      mainElement = contentBlocks[0] || doc.body;
-    }
-    
-    if (!mainElement) {
-      return { content: '', title: '', isDocPage: false };
-    }
-    
-    // Clean up the content
-    const removeSelectors = [
-      'script',
-      'style',
-      'iframe',
-      'form',
-      '.advertisement',
-      '#disqus_thread',
-      '.comments',
-      '.social-share'
-    ];
-    
-    removeSelectors.forEach(selector => {
-      mainElement?.querySelectorAll(selector).forEach(el => el.remove());
-    });
-    
-    // Handle navigation elements
-    if (this.options.excludeNavigation) {
-      mainElement.querySelectorAll('nav, [role="navigation"], .navigation, .menu').forEach(nav => {
-        if (nav.querySelectorAll('p, h1, h2, h3, h4, h5, h6').length === 0) {
-          nav.innerHTML = '{{ NAVIGATION }}';
-        }
-      });
-    }
-    
-    // Extract title
-    const title = 
-      doc.querySelector('main h1, article h1')?.textContent ||
-      doc.querySelector('h1')?.textContent ||
-      doc.querySelector('title')?.textContent?.split('|')[0]?.trim() ||
-      'Untitled Page';
-    
-    // Convert to markdown
-    const markdown = turndownService.turndown(mainElement.innerHTML);
-    
-    // Structure the output
-    const output = `================================================================
-Documentation Page
-================================================================
-Title: ${title}
-URL: ${mainElement.baseURI || 'Unknown'}
-Type: Documentation
-Format: Markdown
-
-================================================================
-Content
-================================================================
-
-${markdown}
-
-================================================================`;
-    
-    // Determine if this is a documentation page
-    const isDocPage = Boolean(
-      mainElement.querySelector('h1, h2, h3') ||
-      mainElement.querySelector('pre code') ||
-      (mainElement.textContent?.length || 0) > 500
-    );
-    
-    return { content: output, title, isDocPage };
-  }
-
-  public async *crawl() {
-    const processingQueue = new Set<string>();
-    
-    while (this.queue.length > 0 && this.visited.size < this.options.maxPages) {
-      const url = this.queue.shift()!;
-      const normalizedUrl = this.normalizeUrl(url);
-      
-      // Skip invalid URLs
-      if (!normalizedUrl) continue;
-      
-      // Skip if already visited or currently processing
-      if (this.visited.has(normalizedUrl) || processingQueue.has(normalizedUrl)) {
-        continue;
-      }
-      
-      // Mark as being processed
-      processingQueue.add(normalizedUrl);
-      
-      try {
-        const html = await this.fetchPage(url);
-        
-        // Extract and queue new links before processing content
-        // This ensures we discover links even if content processing fails
-        const newLinks = this.extractLinks(html, url)
-          .filter(link => {
-            const normalized = this.normalizeUrl(link);
-            return normalized && 
-                   !this.visited.has(normalized) && 
-                   !processingQueue.has(normalized);
-          });
-        
-        // Add new links to the beginning of the queue for breadth-first traversal
-        this.queue.unshift(...newLinks);
-        
-        // Process the content
-        const { content, title, isDocPage } = this.extractMainContent(html);
-        
-        if (!isDocPage) {
-          processingQueue.delete(normalizedUrl);
-          continue;
-        }
-        
-        // Generate content hash for duplicate detection
-        const contentHash = this.generateContentHash(content);
-        
-        // Check for duplicate content
-        const isDuplicate = Array.from(this.visited.values())
-          .some(page => page.contentHash === contentHash);
-        
-        if (isDuplicate) {
-          processingQueue.delete(normalizedUrl);
-          continue;
-        }
-        
-        // Store the visited page
-        this.visited.set(normalizedUrl, {
-          url: normalizedUrl,
-          contentHash,
-          title
-        });
-        
-        // Yield the processed page
-        yield {
-          url: normalizedUrl,
-          title,
-          content,
-          status: "complete"
-        };
-        
-      } catch (error: any) {
-        yield {
-          url,
-          title: url,
-          content: "",
-          status: "error",
-          error: error.message
-        };
-      } finally {
-        processingQueue.delete(normalizedUrl);
-      }
-    }
   }
 }

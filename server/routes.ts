@@ -62,10 +62,11 @@ export function registerRoutes(app: Express) {
 
       const results: any[] = [];
       const crawler = new DocumentationCrawler(url, {
-        maxPages: 20, // More reasonable default
+        maxDepth: settings?.maxDepth ?? 3,
         includeCodeBlocks: settings?.includeCodeBlocks ?? true,
         excludeNavigation: settings?.excludeNavigation ?? true,
         followExternalLinks: settings?.followExternalLinks ?? false,
+        timeout: settings?.timeout ?? 300000 // 5 minutes default
       });
 
       let processedCount = 0;
