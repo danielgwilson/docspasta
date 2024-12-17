@@ -373,57 +373,78 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   // Process sections for duplication and pattern replacement
   Array.from(contentElement.children).forEach(section => {
     const sectionHtml = section.innerHTML;
-    const fingerprint = generateFingerprint(sectionHtml);
     
-    // Check for common patterns
-    for (const [type, { patterns, placeholder }] of Object.entries(commonSections)) {
-      if (patterns.some(pattern => pattern.test(sectionHtml))) {
-        section.innerHTML = `\n${placeholder}\n`;
-        return;
+    // Only process larger sections that might be navigation/common elements
+    if (sectionHtml.length > 500) {
+      // Check for common patterns first
+      for (const [type, { patterns, placeholder }] of Object.entries(commonSections)) {
+        if (patterns.some(pattern => pattern.test(sectionHtml))) {
+          section.innerHTML = `\n${placeholder}\n`;
+          return;
+        }
       }
-    }
-    
-    // Check for duplicates
-    if (sectionFingerprints.has(fingerprint)) {
-      section.remove();
-    } else {
-      sectionFingerprints.set(fingerprint, section.innerHTML);
+      
+      // Only apply duplicate detection to sections that look like navigation/common elements
+      const hasNavCharacteristics = 
+        section.querySelector('nav, header, footer, .nav, .menu, .sidebar') ||
+        /navigation|menu|copyright|footer/i.test(sectionHtml);
+        
+      if (hasNavCharacteristics) {
+        const fingerprint = generateFingerprint(sectionHtml);
+        if (sectionFingerprints.has(fingerprint)) {
+          section.remove();
+        } else {
+          sectionFingerprints.set(fingerprint, section.innerHTML);
+        }
+      }
     }
   });
 
-  // Enhanced list of elements to remove
+  // More targeted list of elements to remove
   const removeSelectors = [
-    // Navigation elements
-    'nav', 'header', 'footer', 
-    '.nav', '.navigation', '.sidebar', '.menu', '.header', '.footer',
-    '[role="navigation"]', '[role="complementary"]',
-    '.table-of-contents', '.toc', 
-    '.breadcrumbs', '.breadcrumb',
-    '[class*="menu"]', '[class*="nav"]',
+    // Only remove navigation elements outside the main content
+    ':not(main):not(article) > nav',
+    ':not(main):not(article) > header',
+    'footer',
     
-    // Social and interactive elements
-    '.share', '.social', '.comments', '.related',
-    '[class*="share"]', '[class*="social"]', '[class*="comment"]',
+    // Navigation-specific elements
+    '[role="navigation"]',
+    '.primary-navigation',
+    '.main-navigation',
+    '.site-navigation',
+    '.breadcrumbs',
     
-    // Advertisement and promotional content
-    '.ad', '.ads', '.advertisement', '.sponsored',
-    '[class*="ad-"]', '[class*="ads-"]', '[id*="google_ads"]',
+    // Table of contents (often duplicates content)
+    '.table-of-contents',
+    '.toc',
+    '[aria-label="Table of contents"]',
     
-    // Utility elements
-    '.toolbar', '.tools', '.utility', '.print',
-    '[class*="toolbar"]', '[class*="utility"]',
+    // Technical and non-content elements
+    'style',
+    'script',
+    'noscript',
+    'iframe:not([title*="example"]):not([title*="demo"])', // Keep example iframes
+    'link',
+    'meta',
     
-    // Technical elements
-    'style', 'script', 'noscript', 'iframe',
-    'link', 'meta', 'template', 'svg',
+    // Promotional content
+    '.advertisement',
+    '.sponsored-content',
+    '[id*="google_ads"]',
+    '[id*="carbonads"]',
     
-    // Dynamic content containers
-    '[data-widget]', '[data-ad]', '[data-tracking]',
-    '[id*="tracking"]', '[id*="analytics"]',
+    // Tracking and analytics
+    '[data-analytics]',
+    '[id*="tracking"]',
+    '[class*="tracking"]',
     
-    // Sidebars and supplementary content
-    'aside', '.aside', '.supplementary', '.secondary',
-    '[role="complementary"]', '[role="banner"]'
+    // Social sharing
+    '.share-buttons',
+    '.social-share',
+    
+    // Keep asides and complementary content if they're small
+    'aside:not(:has(p, pre, code))',
+    '[role="complementary"]:not(:has(p, pre, code))'
   ];
 
   // Remove non-content elements
