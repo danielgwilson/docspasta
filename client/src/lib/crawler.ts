@@ -370,81 +370,87 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
     return { content: '', isDocPage: false };
   }
 
-  // Process sections for duplication and pattern replacement
-  Array.from(contentElement.children).forEach(section => {
-    const sectionHtml = section.innerHTML;
+  // Keep track of identified navigation sections
+  const navigationSections = new Set<Element>();
+  
+  // First pass: identify navigation and common sections
+  Array.from(contentElement.querySelectorAll('*')).forEach(section => {
+    // Skip text nodes and small elements
+    if (section.nodeType !== 1 || section.textContent?.length < 100) return;
     
-    // Only process larger sections that might be navigation/common elements
-    if (sectionHtml.length > 500) {
-      // Check for common patterns first
+    // Check if this is a navigation element
+    const isNavigation = 
+      section.tagName === 'NAV' ||
+      section.tagName === 'HEADER' ||
+      section.tagName === 'FOOTER' ||
+      section.hasAttribute('role') && section.getAttribute('role') === 'navigation' ||
+      section.classList.contains('navigation') ||
+      section.classList.contains('nav') ||
+      section.classList.contains('menu') ||
+      section.classList.contains('sidebar');
+    
+    if (isNavigation) {
+      navigationSections.add(section);
+      return;
+    }
+    
+    // Check for common patterns in larger sections
+    if (section.textContent.length > 500) {
       for (const [type, { patterns, placeholder }] of Object.entries(commonSections)) {
-        if (patterns.some(pattern => pattern.test(sectionHtml))) {
+        if (patterns.some(pattern => pattern.test(section.innerHTML))) {
+          navigationSections.add(section);
           section.innerHTML = `\n${placeholder}\n`;
           return;
         }
       }
-      
-      // Only apply duplicate detection to sections that look like navigation/common elements
-      const hasNavCharacteristics = 
-        section.querySelector('nav, header, footer, .nav, .menu, .sidebar') ||
-        /navigation|menu|copyright|footer/i.test(sectionHtml);
-        
-      if (hasNavCharacteristics) {
-        const fingerprint = generateFingerprint(sectionHtml);
-        if (sectionFingerprints.has(fingerprint)) {
-          section.remove();
-        } else {
-          sectionFingerprints.set(fingerprint, section.innerHTML);
-        }
-      }
+    }
+  });
+  
+  // Second pass: handle duplicate sections, but only for navigation elements
+  navigationSections.forEach(section => {
+    const fingerprint = generateFingerprint(section.innerHTML);
+    if (sectionFingerprints.has(fingerprint)) {
+      section.remove();
+    } else {
+      sectionFingerprints.set(fingerprint, section.innerHTML);
     }
   });
 
   // More targeted list of elements to remove
   const removeSelectors = [
-    // Only remove navigation elements outside the main content
+    // Technical elements that never contain content
+    'style', 'script', 'noscript', 'link', 'meta',
+    
+    // Promotional and tracking elements
+    '[id*="google_ads"]', '[id*="carbonads"]',
+    '[data-analytics]', '[class*="tracking"]',
+    '.advertisement', '.sponsored-content',
+    
+    // Interactive elements that aren't documentation
+    '.share-buttons', '.social-share',
+    '.comments-section', '.feedback-form',
+    
+    // Navigation elements that were already processed
     ':not(main):not(article) > nav',
-    ':not(main):not(article) > header',
-    'footer',
+    ':not(main):not(article) > header:not(:first-child)',
+    'footer:not(:has(> p, > pre, > code))',
     
-    // Navigation-specific elements
-    '[role="navigation"]',
-    '.primary-navigation',
-    '.main-navigation',
-    '.site-navigation',
-    '.breadcrumbs',
+    // Only remove navigation if it's clearly marked
+    '[role="navigation"]:not(:has(article, p))',
+    '.navigation:not(:has(article, p))',
+    '.menu:not(:has(article, p))',
     
-    // Table of contents (often duplicates content)
-    '.table-of-contents',
-    '.toc',
-    '[aria-label="Table of contents"]',
+    // Only remove sidebar content without meaningful content
+    'aside:not(:has(p, pre, code, h1, h2, h3, h4, h5, h6))',
+    '[role="complementary"]:not(:has(p, pre, code, h1, h2, h3, h4, h5, h6))',
     
-    // Technical and non-content elements
-    'style',
-    'script',
-    'noscript',
-    'iframe:not([title*="example"]):not([title*="demo"])', // Keep example iframes
-    'link',
-    'meta',
+    // Utility elements that don't contain documentation
+    '.toolbar:not(:has(pre, code))',
+    '.utility:not(:has(pre, code))',
     
-    // Promotional content
-    '.advertisement',
-    '.sponsored-content',
-    '[id*="google_ads"]',
-    '[id*="carbonads"]',
-    
-    // Tracking and analytics
-    '[data-analytics]',
-    '[id*="tracking"]',
-    '[class*="tracking"]',
-    
-    // Social sharing
-    '.share-buttons',
-    '.social-share',
-    
-    // Keep asides and complementary content if they're small
-    'aside:not(:has(p, pre, code))',
-    '[role="complementary"]:not(:has(p, pre, code))'
+    // Keep any element that contains significant content
+    ':not(:has(p, pre, code, h1, h2, h3, h4, h5, h6)) > .toc',
+    ':not(:has(p, pre, code, h1, h2, h3, h4, h5, h6)) > .table-of-contents'
   ];
 
   // Remove non-content elements
