@@ -56,6 +56,16 @@ export class DocumentationCrawler {
   private visited = new Map<string, VisitedPage>();
   private fingerprints = new Set<string>();
   private schemeFingerprints = new Set<string>();
+  private contentHashes = new Set<string>();
+  private readonly logger: Console;
+
+  private logDebug(message: string, ...args: any[]) {
+    this.logger.debug(`[Crawler] ${message}`, ...args);
+  }
+
+  private logError(message: string, error?: Error) {
+    this.logger.error(`[Crawler Error] ${message}`, error);
+  }
   private queue: PageNode[] = [];
   private baseUrl: string;
   private options: Required<CrawlOptions>;
@@ -63,6 +73,8 @@ export class DocumentationCrawler {
 
   constructor(startUrl: string, options: CrawlOptions = {}) {
     this.baseUrl = new URL(startUrl).origin;
+    this.logger = console;
+    this.logDebug(`Starting crawler at ${startUrl}`);
     this.options = {
       maxDepth: options.maxDepth ?? 5,
       includeCodeBlocks: options.includeCodeBlocks ?? true,
@@ -250,7 +262,8 @@ export class DocumentationCrawler {
     title: string, 
     isDocPage: boolean,
     hierarchy: Record<string, string | null>,
-    anchor: string | null
+    anchor: string | null,
+    contentHash: string
   } {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
@@ -377,7 +390,7 @@ ${markdown}
       (mainElement.textContent?.length || 0) > 500
     );
     
-    return { content: output, title, isDocPage, hierarchy, anchor };
+    return { content: output, title, isDocPage, hierarchy, anchor, contentHash };
   }
 
   public async *crawl() {
@@ -412,15 +425,18 @@ ${markdown}
         // Extract new links before processing content
         const newNodes = this.extractLinks(html, url, depth);
         
-        // Add new nodes to the beginning for breadth-first traversal
-        this.queue.unshift(...newNodes);
+        // Add new nodes to the end for proper breadth-first traversal
+        this.queue.push(...newNodes);
         
         // Process content
-        const { content, title, isDocPage, hierarchy, anchor } = this.extractMainContent(html);
+        const { content, title, isDocPage, hierarchy, anchor, contentHash } = this.extractMainContent(html);
         
-        if (!isDocPage) {
+        if (!isDocPage || this.contentHashes.has(contentHash)) {
+          this.logDebug(`Skipping ${url} - ${!isDocPage ? 'Not a doc page' : 'Duplicate content'}`);
           continue;
         }
+        
+        this.contentHashes.add(contentHash);
         
         // Store the visited page
         this.visited.set(url, {
