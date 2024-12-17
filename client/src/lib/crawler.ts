@@ -9,7 +9,21 @@ const turndownService = new TurndownService({
   emDelimiter: '_',
   strongDelimiter: '**',
   hr: '---',
-  br: '  \n'
+  br: '\n',
+  blankReplacement: (content, node) => {
+    // Check if node is a block element based on display style
+    const isBlock = node instanceof HTMLElement && 
+      (window.getComputedStyle(node).display === 'block' ||
+       ['div', 'p', 'section', 'article'].includes(node.tagName.toLowerCase()));
+    return isBlock ? '\n\n' : '';
+  },
+  keepReplacement: (content, node) => {
+    // Check if node is a block element based on display style
+    const isBlock = node instanceof HTMLElement && 
+      (window.getComputedStyle(node).display === 'block' ||
+       ['div', 'p', 'section', 'article'].includes(node.tagName.toLowerCase()));
+    return isBlock ? `\n\n${content}\n\n` : content;
+  }
 });
 
 // Enhanced code block handling
@@ -284,6 +298,44 @@ export function extractTitle(html: string): string {
   return title;
 }
 
+// Function to generate content fingerprint for duplicate detection
+function generateFingerprint(content: string): string {
+  return content
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .slice(0, 100); // Use first 100 chars for fingerprint
+}
+
+// Cache for duplicate section detection
+const sectionFingerprints = new Map<string, string>();
+
+// Common section patterns for replacement
+const commonSections = {
+  navigation: {
+    patterns: [
+      /(?:Navigation|Menu|Site Map)[\s\S]{0,500}(?:Home|About|Contact|Documentation)/i,
+      /<nav[\s\S]*?<\/nav>/i,
+      /<header[\s\S]*?<\/header>/i
+    ],
+    placeholder: '{{ NAVIGATION }}'
+  },
+  footer: {
+    patterns: [
+      /(?:Footer|Copyright|All rights reserved)[\s\S]{0,500}(?:\d{4}|Terms|Privacy)/i,
+      /<footer[\s\S]*?<\/footer>/i
+    ],
+    placeholder: '{{ FOOTER }}'
+  },
+  sidebar: {
+    patterns: [
+      /(?:Table of Contents|On this page|In this article)[\s\S]{0,300}(?:<ul|<ol)/i,
+      /<aside[\s\S]*?<\/aside>/i
+    ],
+    placeholder: '{{ SIDEBAR }}'
+  }
+};
+
 export function extractMainContent(html: string): { content: string, isDocPage: boolean } {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
@@ -317,6 +369,27 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
   if (!contentElement) {
     return { content: '', isDocPage: false };
   }
+
+  // Process sections for duplication and pattern replacement
+  Array.from(contentElement.children).forEach(section => {
+    const sectionHtml = section.innerHTML;
+    const fingerprint = generateFingerprint(sectionHtml);
+    
+    // Check for common patterns
+    for (const [type, { patterns, placeholder }] of Object.entries(commonSections)) {
+      if (patterns.some(pattern => pattern.test(sectionHtml))) {
+        section.innerHTML = `\n${placeholder}\n`;
+        return;
+      }
+    }
+    
+    // Check for duplicates
+    if (sectionFingerprints.has(fingerprint)) {
+      section.remove();
+    } else {
+      sectionFingerprints.set(fingerprint, section.innerHTML);
+    }
+  });
 
   // Enhanced list of elements to remove
   const removeSelectors = [
@@ -358,8 +431,16 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
     contentElement.querySelectorAll(selector).forEach(el => el.remove());
   });
 
-  // Clean up elements
+  // Clean up elements and handle link whitespace
   contentElement.querySelectorAll('*').forEach(el => {
+    // Clean up link elements specifically
+    if (el.tagName === 'A') {
+      const textContent = el.textContent?.trim();
+      if (textContent) {
+        el.textContent = textContent; // Remove extra whitespace within link text
+      }
+    }
+    
     // Remove non-content attributes
     const keepAttrs = ['href', 'src', 'alt', 'title', 'lang'];
     Array.from(el.attributes).forEach(attr => {
@@ -368,19 +449,21 @@ export function extractMainContent(html: string): { content: string, isDocPage: 
       }
     });
     
-    // Normalize whitespace in text nodes
+    // Enhanced whitespace normalization
     if (el.childNodes) {
       el.childNodes.forEach(node => {
         if (node.nodeType === 3) { // Text node
-          node.textContent = node.textContent?.replace(/\s+/g, ' ').trim();
+          let content = node.textContent || '';
+          content = content
+            .replace(/\s+/g, ' ') // Collapse multiple spaces
+            .replace(/\n{2,}/g, '\n') // Collapse multiple newlines
+            .replace(/^\s+|\s+$/g, '') // Trim start/end whitespace
+            .trim();
+          node.textContent = content;
         }
       });
     }
   });
-  
-  if (!contentElement) {
-    return { content: '', isDocPage: false };
-  }
 
   // Always consider pages with meaningful content as valid
   const isDocPage = Boolean(
