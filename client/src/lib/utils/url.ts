@@ -6,17 +6,22 @@ import crypto from 'crypto';
  */
 export function normalizeUrl(url: string, baseUrl: string, followExternalLinks: boolean): string {
   try {
-    // Filter out obviously invalid URLs
-    if (!url || url === '/' || url === '#' || url.includes('javascript:')) {
+    // Basic validation
+    if (!url?.trim() || url === '/' || url === '#' || url.includes('javascript:')) {
       return '';
     }
 
-    // Handle relative URLs
-    if (url.startsWith('/')) {
+    // Clean up input URL
+    url = url.trim().replace(/([^:]\/)\/+/g, '$1');
+
+    // Handle relative URLs and add protocol if missing
+    if (url.startsWith('//')) {
+      url = 'https:' + url;
+    } else if (url.startsWith('/')) {
       const base = new URL(baseUrl);
       url = `${base.origin}${url}`;
     } else if (!url.match(/^https?:\/\//)) {
-      url = new URL(url, baseUrl).toString();
+      url = 'https://' + url.replace(/^:?\/?\/?/, '');
     }
     
     const parsed = new URL(url);

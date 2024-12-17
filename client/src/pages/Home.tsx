@@ -114,14 +114,17 @@ export default function Home() {
       });
     },
     onError: (error: Error) => {
+      const message = error.message.includes('Invalid URL') 
+        ? 'Please enter a valid URL (e.g., https://example.com/docs)'
+        : error.message;
+      
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
         duration: 5000,
       });
       setResults([]);
-      setUrl("");
     },
   });
 
