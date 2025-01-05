@@ -1,161 +1,202 @@
-import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { ChevronDown, ChevronUp, ExternalLink, Clock, User, Hash, Code, File } from "lucide-react"
-import { useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import type { CrawlResult } from "@/types/crawler"
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Check, Copy, Download } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import type { CrawlResult } from '@/types/crawler';
 
 interface ResultsListProps {
-  results: CrawlResult[]
+  results: CrawlResult[];
 }
 
 export function ResultsList({ results }: ResultsListProps) {
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
+  const { toast } = useToast();
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [isCopyingAll, setIsCopyingAll] = useState(false);
 
-  const toggleItem = (url: string) => {
-    const newExpanded = new Set(expandedItems)
-    if (expandedItems.has(url)) {
-      newExpanded.delete(url)
-    } else {
-      newExpanded.add(url)
+  const handleCopy = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(cleanContent(text));
+      setCopiedIndex(index);
+      toast({
+        title: 'Copied!',
+        description: 'Content copied to clipboard',
+      });
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      toast({
+        title: 'Failed to copy',
+        description: 'Please try again',
+        variant: 'destructive',
+      });
     }
-    setExpandedItems(newExpanded)
-  }
+  };
+
+  const handleCopyAll = async () => {
+    try {
+      setIsCopyingAll(true);
+      const allContent = results
+        .map((r) => `# ${r.title}\n\n${cleanContent(r.content)}`)
+        .join('\n\n---\n\n');
+      await navigator.clipboard.writeText(allContent);
+      toast({
+        title: 'Copied All!',
+        description: 'All content copied to clipboard',
+      });
+      setTimeout(() => setIsCopyingAll(false), 2000);
+    } catch (err) {
+      toast({
+        title: 'Failed to copy',
+        description: 'Please try again',
+        variant: 'destructive',
+      });
+      setIsCopyingAll(false);
+    }
+  };
+
+  const handleExport = (result: CrawlResult) => {
+    const cleanedResult = {
+      ...result,
+      content: cleanContent(result.content),
+    };
+    const blob = new Blob([JSON.stringify(cleanedResult, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${result.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: 'Exported!',
+      description: 'Result saved as JSON',
+    });
+  };
+
+  const cleanContent = (content: string): string => {
+    return (
+      content
+        // Remove excessive newlines (more than 2)
+        .replace(/\n{3,}/g, '\n\n')
+        // Remove lines that are just whitespace or single characters
+        .replace(/^\s*[\r\n]{1,2}|^[\s\u200B]+$/gm, '')
+        // Remove unnecessary whitespace at the end of lines
+        .replace(/\s+$/gm, '')
+        // Remove zero-width spaces
+        .replace(/\u200B/g, '')
+        // Normalize markdown headers with no content
+        .replace(/#{1,6}\s*\n/g, '')
+        // Clean up empty markdown links
+        .replace(/\[\s*\]\(\s*\)/g, '')
+        // Remove empty navigation sections
+        .replace(/Navigation\s*\n\s*\n/gi, 'Navigation\n')
+        // Trim the final string
+        .trim()
+    );
+  };
 
   return (
-    <div className="space-y-4">
-      {results.filter(r => r.status === "complete").map((result) => {
-        const isExpanded = expandedItems.has(result.url)
-        const hostname = new URL(result.url).hostname
-        const pathname = new URL(result.url).pathname
-        
-        return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold tracking-tight">Results</h2>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            className="flex-1 sm:flex-none"
+            onClick={handleCopyAll}>
+            {isCopyingAll ? (
+              <>
+                <Check className="mr-2 h-4 w-4" />
+                Copied All
+              </>
+            ) : (
+              <>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy All
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 sm:flex-none"
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(results, null, 2)], {
+                type: 'application/json',
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'crawler-results.json';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+
+              toast({
+                title: 'Exported All!',
+                description: 'All results saved as JSON',
+              });
+            }}>
+            <Download className="mr-2 h-4 w-4" />
+            Export All
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-6">
+        {results.map((result, index) => (
           <Card key={result.url} className="overflow-hidden">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1.5">
-                  <h3 className="font-semibold text-lg leading-none">
-                    {result.title}
-                  </h3>
-                  <p className="text-sm text-muted-foreground flex items-center gap-2">
-                    <span className="font-medium">{hostname}</span>
-                    <span className="text-muted-foreground/60">{pathname}</span>
-                  </p>
-                  
-                  {/* Metadata badges */}
-                  {result.metadata && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {result.metadata.lastModified && (
-                        <div className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-1 rounded">
-                          <Clock className="w-3 h-3" />
-                          {new Date(result.metadata.lastModified).toLocaleDateString()}
-                        </div>
-                      )}
-                      {result.metadata.author && (
-                        <div className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-1 rounded">
-                          <User className="w-3 h-3" />
-                          {result.metadata.author}
-                        </div>
-                      )}
-                      {result.metadata.language && (
-                        <div className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-1 rounded">
-                          <Code className="w-3 h-3" />
-                          {result.metadata.language}
-                        </div>
-                      )}
-                      {result.metadata.tags?.map(tag => (
-                        <div key={tag} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-1 rounded">
-                          <Hash className="w-3 h-3" />
-                          {tag}
-                        </div>
-                      ))}
-                    </div>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 sm:px-6">
+              <CardTitle className="text-xl font-semibold line-clamp-1">
+                {result.title || 'Untitled'}
+              </CardTitle>
+              <div className="flex gap-2 ml-4">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => handleCopy(result.content, index)}>
+                  {copiedIndex === index ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
                   )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => window.open(result.url, '_blank')}
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => toggleItem(result.url)}
-                  >
-                    {isExpanded ? (
-                      <ChevronUp className="w-4 h-4" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4" />
-                    )}
-                  </Button>
-                </div>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => handleExport(result)}>
+                  <Download className="h-4 w-4" />
+                </Button>
               </div>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="pt-4 mt-4 border-t space-y-4">
-                      {/* Navigation hierarchy */}
-                      {result.hierarchy && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <FileTree className="w-4 h-4" />
-                          <div className="flex items-center gap-1">
-                            {result.hierarchy.parent && (
-                              <span className="hover:underline cursor-pointer">
-                                Parent
-                              </span>
-                            )}
-                            {result.hierarchy.section && (
-                              <span className="text-muted-foreground/60">
-                                › {result.hierarchy.section}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Main content */}
-                      <div className="prose prose-sm max-w-none">
-                        {result.content}
-                      </div>
-
-                      {/* Code blocks */}
-                      {result.codeBlocks && result.codeBlocks.length > 0 && (
-                        <div className="space-y-4">
-                          <h4 className="text-sm font-medium">Code Examples</h4>
-                          {result.codeBlocks.map((block, index) => (
-                            <div key={index} className="space-y-2">
-                              {block.title && (
-                                <div className="text-xs text-muted-foreground">
-                                  {block.title}
-                                </div>
-                              )}
-                              <pre className="text-sm whitespace-pre-wrap font-mono bg-muted p-4 rounded-lg overflow-x-auto">
-                                <code className={`language-${block.language}`}>
-                                  {block.content}
-                                </code>
-                              </pre>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-4">
+                <div className="text-sm text-muted-foreground">
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline break-all">
+                    {result.url}
+                  </a>
+                </div>
+                <ScrollArea className="h-[200px] sm:h-[300px] w-full rounded-md border p-4">
+                  <pre className="text-sm whitespace-pre-wrap">
+                    {cleanContent(result.content)}
+                  </pre>
+                </ScrollArea>
+              </div>
             </CardContent>
           </Card>
-        )
-      })}
+        ))}
+      </div>
     </div>
-  )
+  );
 }

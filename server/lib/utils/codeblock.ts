@@ -1,17 +1,3 @@
-import { JSDOM } from 'jsdom';
-
-// Create JSDOM instance with secure configuration
-const jsdom = new JSDOM('', {
-  runScripts: 'outside-only',
-  resources: 'usable',
-  url: 'http://localhost',
-});
-
-const { Element, document } = jsdom.window;
-
-/**
- * Utility class for handling code block detection and language inference
- */
 export class CodeBlockHandler {
   private static readonly languageMap: Record<string, string> = {
     'language-js': 'javascript',

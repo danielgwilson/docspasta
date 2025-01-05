@@ -1,6 +1,11 @@
 /**
  * Utility class for managing documentation hierarchy
  */
+interface HierarchyItem {
+  text: string;
+  level: number;
+}
+
 export class Hierarchy {
   /**
    * Returns the radio hierarchy where only one level is filled
@@ -42,7 +47,7 @@ export class Hierarchy {
       lvl3: null,
       lvl4: null,
       lvl5: null,
-      lvl6: null
+      lvl6: null,
     };
   }
 
@@ -50,20 +55,15 @@ export class Hierarchy {
    * Extract hierarchy from a DOM element by finding all heading tags
    * and mapping them to the appropriate level
    */
-  static extractHierarchy(mainElement: Element): Record<string, string | null> {
-    const hierarchy = this.generateEmptyHierarchy();
-    const headingElements = mainElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    
-    Array.from(headingElements).forEach(heading => {
-      const level = parseInt(heading.tagName[1]) - 1;
-      const content = heading.textContent?.trim();
-      
-      if (content && level >= 0 && level <= 6) {
-        hierarchy[`lvl${level}`] = content;
-      }
-    });
-    
-    return hierarchy;
+  static extractHierarchy(element: Element): HierarchyItem[] {
+    const headings = Array.from(
+      element.querySelectorAll('h1, h2, h3, h4, h5, h6')
+    );
+
+    return headings.map((heading) => ({
+      text: heading.textContent?.trim() || '',
+      level: parseInt(heading.tagName[1], 10),
+    }));
   }
 
   /**
@@ -71,8 +71,6 @@ export class Hierarchy {
    * and removing any unwanted characters
    */
   static extractContent(element: Element): string {
-    return (element.textContent || '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return (element.textContent || '').replace(/\s+/g, ' ').trim();
   }
 }

@@ -1,0 +1,22 @@
+// This file guides AI-based IDEs on how to work with this codebase
+
+// Documentation System
+READ_FIRST: ["README.md", "AI.md", ".docs/ai-notes/README.md"]
+TEMPLATES_DIR: ".docs/ai-notes/_templates"
+TEMP_NOTES_DIR: ".docs/ai-notes/temp"
+PERMANENT_DOCS_DIR: ".docs/ai-notes/topics"
+
+// Code Style
+PREFER_ARROW_FUNCTIONS: true
+PREFER_FUNCTIONAL: true
+PREFER_NAMED_EXPORTS: true
+USE_NEXTJS_APP_ROUTER: true
+PREFER_SERVER_ACTIONS: true
+FILE_NAMING: "kebab-case"
+
+// Tech Stack
+NEXTJS_VERSION: 15
+REACT_VERSION: 19
+NODE_VERSION: 20
+USE_TYPESCRIPT: true
+USE_TAILWIND: true 
