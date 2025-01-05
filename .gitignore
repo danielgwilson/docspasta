@@ -27,3 +27,5 @@ yarn-error.log*
 
 # AI Documentation System
 .docs/ai-notes/temp/
+
+IMG_*
