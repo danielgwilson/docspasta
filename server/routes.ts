@@ -16,7 +16,7 @@ async function fetchUrlPreview(url: string) {
     
     return await response.text();
   } catch (error) {
-    throw new Error(`Failed to fetch URL: ${error.message}`);
+    throw new Error(`Failed to fetch URL: ${(error as Error).message}`);
   }
 }
 
