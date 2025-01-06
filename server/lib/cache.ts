@@ -62,10 +62,19 @@ export class CrawlerCache {
   async get(url: string): Promise<PageResult | null> {
     try {
       const key = generateCacheKey(url);
-      const value = await this.db.get(key);
+      const rawValue = await this.db.get(key);
 
-      if (!value) {
+      if (!rawValue) {
         this.log.debug('Cache miss for URL:', url);
+        return null;
+      }
+
+      let value: CacheEntry;
+      try {
+        value = JSON.parse(rawValue as string);
+      } catch (e) {
+        this.log.warn('Failed to parse cache entry for URL:', url);
+        await this.delete(url);
         return null;
       }
 
@@ -76,17 +85,15 @@ export class CrawlerCache {
         return null;
       }
 
-      const entry = value as CacheEntry;
-
       // Check if entry has expired
-      if (Date.now() > entry.expiresAt) {
+      if (Date.now() > value.expiresAt) {
         this.log.debug('Cache expired for URL:', url);
         await this.delete(url);
         return null;
       }
 
       this.log.info('Cache hit for URL:', url);
-      return entry.result;
+      return value.result;
     } catch (error) {
       this.log.error('Cache get error:', error);
       return null;
@@ -108,7 +115,7 @@ export class CrawlerCache {
         expiresAt: Date.now() + this.ttl
       };
 
-      await this.db.set(key, entry);
+      await this.db.set(key, JSON.stringify(entry));
       this.log.info('Cached result for URL:', url);
     } catch (error) {
       this.log.error('Cache set error:', error);
@@ -194,10 +201,19 @@ export class CrawlerCache {
   async has(url: string): Promise<boolean> {
     try {
       const key = generateCacheKey(url);
-      const value = await this.db.get(key);
+      const rawValue = await this.db.get(key);
 
-      if (!value) {
+      if (!rawValue) {
         this.log.debug('URL not in cache:', url);
+        return false;
+      }
+
+      let value: CacheEntry;
+      try {
+        value = JSON.parse(rawValue as string);
+      } catch (e) {
+        this.log.warn('Failed to parse cache entry for URL:', url);
+        await this.delete(url);
         return false;
       }
 
@@ -208,10 +224,8 @@ export class CrawlerCache {
         return false;
       }
 
-      const entry = value as CacheEntry;
-
       // Check expiration
-      if (Date.now() > entry.expiresAt) {
+      if (Date.now() > value.expiresAt) {
         this.log.debug('Cache entry expired for URL:', url);
         await this.delete(url);
         return false;
