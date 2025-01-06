@@ -1,7 +1,8 @@
 import { JSDOM, VirtualConsole } from 'jsdom';
 import TurndownService from 'turndown';
-import crypto from 'crypto';
 import pQueue from 'p-queue';
+import { crawlerCache } from './cache';
+import type { PageResult } from '../../client/src/lib/types';
 
 // Create logger helper
 const log = {
@@ -37,19 +38,9 @@ interface PageNode {
   parent?: string;
 }
 
-interface PageResult {
-  url: string;
-  status: 'complete' | 'error' | 'skipped';
-  depth: number;
-  title?: string;
-  content?: string;
-  contentLength?: number;
-  error?: Error;
-}
-
 export class DocumentationCrawler {
   private visited = new Set<string>();
-  private queued = new Set<string>(); // Track queued URLs separately
+  private queued = new Set<string>();
   private queue: pQueue;
   private baseUrl: string;
   private options: Required<CrawlerOptions>;
@@ -141,7 +132,7 @@ export class DocumentationCrawler {
       try {
         // Handle anchor links
         if (href.startsWith('#')) {
-          continue; // Skip pure anchor links
+          continue;
         }
 
         const url = new URL(href, baseUrl).href;
@@ -175,7 +166,7 @@ export class DocumentationCrawler {
         }
 
         nodes.push({
-          url: urlWithoutHash, // Use URL without hash
+          url: urlWithoutHash,
           depth: depth + 1,
           parent: baseUrl,
         });
@@ -232,11 +223,32 @@ export class DocumentationCrawler {
     // Check depth before processing
     if (depth > this.options.maxDepth) {
       log.debug('Skipping - max depth reached:', url, depth);
-      const result = {
+      const result: PageResult = {
         url,
-        status: 'skipped' as const,
+        status: 'skipped',
         depth,
         title: 'Max Depth Reached',
+        timestamp: Date.now(),
+        content: '', //Added to satisfy PageResult type
+        error: '', //Added to satisfy PageResult type
+      };
+      this.results.push(result);
+      this.onProgress?.(result);
+      return result;
+    }
+
+    // Check cache first
+    const cachedResult = await crawlerCache.get(url);
+    if (cachedResult) {
+      log.info('Cache hit for URL:', url);
+      this.visited.add(url);
+      this.queued.delete(url);
+
+      // Update depth and timestamp for the cached result
+      const result: PageResult = {
+        ...cachedResult,
+        depth,
+        timestamp: Date.now(),
       };
       this.results.push(result);
       this.onProgress?.(result);
@@ -249,91 +261,57 @@ export class DocumentationCrawler {
 
     try {
       const html = await this.fetchWithRetry(url);
-      log.debug('Fetched HTML length:', html.length);
-
-      // Configure JSDOM with proper settings
       const dom = new JSDOM(html, {
         url,
-        contentType: 'text/html',
-        pretendToBeVisual: true,
+        virtualConsole: new VirtualConsole(),
         runScripts: 'dangerously',
         resources: 'usable',
-        virtualConsole: new VirtualConsole(),
-        beforeParse(window) {
-          window._virtualConsole = window._virtualConsole || { on: () => {} };
-          window.HTMLElement.prototype.scrollIntoView = () => {};
-          window.HTMLElement.prototype.getBoundingClientRect = () => ({
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-            width: 0,
-            height: 0,
-            x: 0,
-            y: 0,
-            toJSON() {
-              return {
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0,
-                width: 0,
-                height: 0,
-                x: 0,
-                y: 0,
-              };
-            },
-          });
-        },
       });
 
       const document = dom.window.document;
-      log.debug('Document title:', document.title);
-
-      // Find main content area
       const mainElement = this.findMainElement(document);
       this.cleanContent(mainElement);
 
-      // Extract and convert content to markdown
       const markdown = turndownService.turndown(mainElement.innerHTML);
-      log.debug('Body length:', markdown.length);
 
       // Extract links before completing
       if (depth < this.options.maxDepth) {
         const links = this.extractLinks(document, url, depth);
-        log.debug(`Found ${links.length} links at depth ${depth}`);
-
-        // Queue the next set of URLs
         for (const link of links) {
           this.queueUrl(link);
         }
       }
 
-      const result = {
+      const result: PageResult = {
         url,
-        status: 'complete' as const,
+        status: 'complete',
         depth,
         title: document.title,
         content: markdown,
-        contentLength: markdown.length,
+        timestamp: Date.now(),
+        error: '', //Added to satisfy PageResult type
       };
 
-      log.info('Successfully processed:', url, {
-        title: result.title,
-        contentLength: result.contentLength,
-      });
+      // Cache the successful result
+      await crawlerCache.set(url, result);
 
+      log.info('Successfully processed:', url);
       this.results.push(result);
       this.onProgress?.(result);
       return result;
     } catch (error) {
-      const result = {
+      const result: PageResult = {
         url,
-        status: 'error' as const,
+        status: 'error',
         depth,
-        error: error as Error,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now(),
+        content: '', //Added to satisfy PageResult type
+        title: '', //Added to satisfy PageResult type
+
       };
-      this.errors.set(url, error as Error);
+
+      this.errors.set(url, error instanceof Error ? error : new Error(String(error)));
       this.results.push(result);
       this.onProgress?.(result);
       return result;
