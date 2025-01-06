@@ -53,7 +53,7 @@ export class CrawlerCache {
       throw new Error('Database not initialized');
     }
     this.db = db;
-    this.ttl = ttlHours * 60 * 60 * 1000; // Convert hours to milliseconds
+    this.ttl = ttlHours * 60 * 60 * 1000;
   }
 
   /**
@@ -65,39 +65,34 @@ export class CrawlerCache {
       const rawValue = await this.db.get(key);
 
       if (!rawValue) {
-        this.log.debug('Cache miss for URL:', url);
         return null;
       }
 
-      // Handle potential non-string values from database
-      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
-
-      let value: CacheEntry;
       try {
-        value = JSON.parse(valueStr);
+        // Parse the value based on its type
+        const parsed = typeof rawValue === 'string' ? 
+          JSON.parse(rawValue) : 
+          rawValue;
+
+        // Validate the structure
+        if (!this.isValidCacheEntry(parsed)) {
+          return null;
+        }
+
+        // Check expiration
+        if (Date.now() > parsed.expiresAt) {
+          await this.delete(url);
+          return null;
+        }
+
+        return parsed.result;
       } catch (e) {
-        this.log.warn('Failed to parse cache entry for URL:', url, e);
-        await this.delete(url);
+        // Log parse error but don't throw
+        this.log.debug('Error parsing cache:', e);
         return null;
       }
-
-      // Type guard to ensure value is a CacheEntry
-      if (!this.isValidCacheEntry(value)) {
-        this.log.warn('Invalid cache entry for URL:', url);
-        await this.delete(url);
-        return null;
-      }
-
-      // Check if entry has expired
-      if (Date.now() > value.expiresAt) {
-        this.log.debug('Cache expired for URL:', url);
-        await this.delete(url);
-        return null;
-      }
-
-      this.log.info('Cache hit for URL:', url);
-      return value.result;
     } catch (error) {
+      // Log database error but don't throw
       this.log.error('Cache get error:', error);
       return null;
     }
@@ -118,10 +113,7 @@ export class CrawlerCache {
         expiresAt: Date.now() + this.ttl,
       };
 
-      // Ensure we're storing a proper JSON string
-      const valueStr = JSON.stringify(entry);
-      await this.db.set(key, valueStr);
-      this.log.info('Cached result for URL:', url);
+      await this.db.set(key, entry);
     } catch (error) {
       this.log.error('Cache set error:', error);
     }
@@ -143,10 +135,7 @@ export class CrawlerCache {
         settings,
       };
 
-      // Ensure we're storing a proper JSON string
-      const valueStr = JSON.stringify(entry);
-      await this.db.set(key, valueStr);
-      this.log.info('Cached full crawl results for starting URL:', startUrl, 'with', results.length, 'pages');
+      await this.db.set(key, entry);
     } catch (error) {
       this.log.error('Full crawl cache set error:', error);
     }
@@ -161,44 +150,36 @@ export class CrawlerCache {
       const rawValue = await this.db.get(key);
 
       if (!rawValue) {
-        this.log.debug('No cached crawl results for URL:', startUrl);
         return null;
       }
 
-      // Handle potential non-string values from database
-      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
-
-      let value: FullCrawlCache;
       try {
-        value = JSON.parse(valueStr);
+        // Parse the value based on its type
+        const parsed = typeof rawValue === 'string' ? 
+          JSON.parse(rawValue) : 
+          rawValue;
+
+        // Validate the structure
+        if (!this.isValidFullCrawlCache(parsed)) {
+          return null;
+        }
+
+        // Check expiration
+        if (Date.now() > parsed.expiresAt) {
+          await this.delete(startUrl);
+          return null;
+        }
+
+        // Compare settings
+        if (JSON.stringify(settings) !== JSON.stringify(parsed.settings)) {
+          return null;
+        }
+
+        return parsed.results;
       } catch (e) {
-        this.log.warn('Failed to parse cached value for URL:', startUrl, e);
-        await this.db.delete(key);
+        this.log.debug('Error parsing full cache:', e);
         return null;
       }
-
-      // Validate cache structure
-      if (!this.isValidFullCrawlCache(value)) {
-        this.log.warn('Invalid cache structure for URL:', startUrl);
-        await this.db.delete(key);
-        return null;
-      }
-
-      if (Date.now() > value.expiresAt) {
-        this.log.debug('Cached crawl results expired for URL:', startUrl);
-        await this.db.delete(key);
-        return null;
-      }
-
-      // Compare settings to ensure cache validity
-      const settingsMatch = JSON.stringify(settings) === JSON.stringify(value.settings);
-      if (!settingsMatch) {
-        this.log.debug('Cached crawl settings mismatch for URL:', startUrl);
-        return null;
-      }
-
-      this.log.info('Cache hit for full crawl of URL:', startUrl);
-      return value.results;
     } catch (error) {
       this.log.error('Get crawl results error:', error);
       return null;
@@ -210,41 +191,8 @@ export class CrawlerCache {
    */
   async has(url: string): Promise<boolean> {
     try {
-      const key = generateCacheKey(url);
-      const rawValue = await this.db.get(key);
-
-      if (!rawValue) {
-        this.log.debug('URL not in cache:', url);
-        return false;
-      }
-
-      // Handle potential non-string values from database
-      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
-
-      let value: CacheEntry;
-      try {
-        value = JSON.parse(valueStr);
-      } catch (e) {
-        this.log.warn('Failed to parse cache entry for URL:', url, e);
-        await this.delete(url);
-        return false;
-      }
-
-      // Type guard to ensure value is a CacheEntry
-      if (!this.isValidCacheEntry(value)) {
-        this.log.warn('Invalid cache entry found for URL:', url);
-        await this.delete(url);
-        return false;
-      }
-
-      // Check expiration
-      if (Date.now() > value.expiresAt) {
-        this.log.debug('Cache entry expired for URL:', url);
-        await this.delete(url);
-        return false;
-      }
-
-      return true;
+      const result = await this.get(url);
+      return result !== null;
     } catch (error) {
       this.log.error('Cache check error:', error);
       return false;
@@ -258,7 +206,6 @@ export class CrawlerCache {
     try {
       const key = generateCacheKey(url);
       await this.db.delete(key);
-      this.log.debug('Deleted cache entry for URL:', url);
     } catch (error) {
       this.log.error('Cache delete error:', error);
     }
@@ -275,7 +222,6 @@ export class CrawlerCache {
           typeof key === 'string' && (key.startsWith('crawl:') || key.startsWith('full:'))
         );
         await Promise.all(crawlKeys.map(key => this.db.delete(key)));
-        this.log.info('Cleared all cache entries:', crawlKeys.length, 'entries removed');
       }
     } catch (error) {
       this.log.error('Cache clear error:', error);
@@ -292,12 +238,11 @@ export class CrawlerCache {
 
     const entry = value as Partial<CacheEntry>;
     return (
+      typeof entry.timestamp === 'number' &&
+      typeof entry.expiresAt === 'number' &&
       entry.result !== undefined &&
       typeof entry.result === 'object' &&
-      entry.timestamp !== undefined &&
-      typeof entry.timestamp === 'number' &&
-      entry.expiresAt !== undefined &&
-      typeof entry.expiresAt === 'number'
+      entry.result !== null
     );
   }
 
@@ -312,9 +257,7 @@ export class CrawlerCache {
     const cache = value as Partial<FullCrawlCache>;
     return (
       Array.isArray(cache.results) &&
-      cache.timestamp !== undefined &&
       typeof cache.timestamp === 'number' &&
-      cache.expiresAt !== undefined &&
       typeof cache.expiresAt === 'number' &&
       cache.settings !== undefined &&
       typeof cache.settings === 'object'
