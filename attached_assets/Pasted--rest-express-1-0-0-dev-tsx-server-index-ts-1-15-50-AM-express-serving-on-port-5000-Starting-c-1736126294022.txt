@@ -1,0 +1,40 @@
+> rest-express@1.0.0 dev
+> tsx server/index.ts
+
+1:15:50 AM [express] serving on port 5000
+Starting crawl with settings: {
+  maxDepth: 3,
+  includeCodeBlocks: true,
+  excludeNavigation: true,
+  followExternalLinks: false
+}
+[Crawler] Initializing crawler for https://docs.lovable.dev/introduction
+[Crawler] Queueing URL at depth 0: https://docs.lovable.dev/introduction
+[Crawler] Processing URL: https://docs.lovable.dev/introduction at depth 0
+[Crawler] Starting crawl
+[Cache] Failed to parse cache entry for URL: https://docs.lovable.dev/introduction
+[Cache] Deleted cache entry for URL: https://docs.lovable.dev/introduction
+[Cache] Failed to parse cached value for URL: https://docs.lovable.dev/introduction
+1:16:19 AM [express] POST /api/preview 200 in 9ms
+[Crawler] Queueing URL at depth 1: https://docs.lovable.dev/
+[Crawler] Queueing URL at depth 1: https://docs.lovable.dev/user-guides/quickstart
+[Crawler] Queueing URL at depth 1: https://docs.lovable.dev/integrations
+[Crawler] Queueing URL at depth 1: https://docs.lovable.dev/tips-tricks
+[Crawler] Queueing URL at depth 1: https://docs.lovable.dev/user-guides/messaging-limits
+[Cache] Cached result for URL: https://docs.lovable.dev/introduction
+[Crawler] Successfully processed: https://docs.lovable.dev/introduction
+[Crawler] Processing URL: https://docs.lovable.dev/ at depth 1
+[Cache] Failed to parse cache entry for URL: https://docs.lovable.dev/
+[Cache] Deleted cache entry for URL: https://docs.lovable.dev/
+[Cache] Cached result for URL: https://docs.lovable.dev/
+[Crawler] Successfully processed: https://docs.lovable.dev/
+[Crawler] Processing URL: https://docs.lovable.dev/user-guides/quickstart at depth 1
+[Cache] Failed to parse cache entry for URL: https://docs.lovable.dev/user-guides/quickstart
+[Cache] Deleted cache entry for URL: https://docs.lovable.dev/user-guides/quickstart
+[Crawler] Queueing URL at depth 2: https://docs.lovable.dev/user-guides/support-policy
+[Crawler] Queueing URL at depth 2: https://docs.lovable.dev/tips-tricks/prompting
+[Cache] Cached result for URL: https://docs.lovable.dev/user-guides/quickstart
+[Crawler] Successfully processed: https://docs.lovable.dev/user-guides/quickstart
+[Crawler] Processing URL: https://docs.lovable.dev/integrations at depth 1
+[Cache] Failed to parse cache entry for URL: https://docs.lovable.dev/integrations
+[Cache] Deleted cache entry for URL: https://do
