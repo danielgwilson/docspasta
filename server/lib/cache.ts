@@ -69,11 +69,14 @@ export class CrawlerCache {
         return null;
       }
 
+      // Handle potential non-string values from database
+      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
+
       let value: CacheEntry;
       try {
-        value = JSON.parse(rawValue as string);
+        value = JSON.parse(valueStr);
       } catch (e) {
-        this.log.warn('Failed to parse cache entry for URL:', url);
+        this.log.warn('Failed to parse cache entry for URL:', url, e);
         await this.delete(url);
         return null;
       }
@@ -109,13 +112,15 @@ export class CrawlerCache {
       const entry: CacheEntry = {
         result: {
           ...result,
-          status: result.status === 'skipped' ? 'complete' : result.status
+          status: result.status === 'skipped' ? 'complete' : result.status,
         },
         timestamp: Date.now(),
-        expiresAt: Date.now() + this.ttl
+        expiresAt: Date.now() + this.ttl,
       };
 
-      await this.db.set(key, JSON.stringify(entry));
+      // Ensure we're storing a proper JSON string
+      const valueStr = JSON.stringify(entry);
+      await this.db.set(key, valueStr);
       this.log.info('Cached result for URL:', url);
     } catch (error) {
       this.log.error('Cache set error:', error);
@@ -131,14 +136,16 @@ export class CrawlerCache {
       const entry: FullCrawlCache = {
         results: results.map(result => ({
           ...result,
-          status: result.status === 'skipped' ? 'complete' : result.status
+          status: result.status === 'skipped' ? 'complete' : result.status,
         })),
         timestamp: Date.now(),
         expiresAt: Date.now() + this.ttl,
         settings,
       };
 
-      await this.db.set(key, JSON.stringify(entry));
+      // Ensure we're storing a proper JSON string
+      const valueStr = JSON.stringify(entry);
+      await this.db.set(key, valueStr);
       this.log.info('Cached full crawl results for starting URL:', startUrl, 'with', results.length, 'pages');
     } catch (error) {
       this.log.error('Full crawl cache set error:', error);
@@ -158,11 +165,14 @@ export class CrawlerCache {
         return null;
       }
 
+      // Handle potential non-string values from database
+      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
+
       let value: FullCrawlCache;
       try {
-        value = JSON.parse(rawValue as string);
+        value = JSON.parse(valueStr);
       } catch (e) {
-        this.log.warn('Failed to parse cached value for URL:', startUrl);
+        this.log.warn('Failed to parse cached value for URL:', startUrl, e);
         await this.db.delete(key);
         return null;
       }
@@ -208,11 +218,14 @@ export class CrawlerCache {
         return false;
       }
 
+      // Handle potential non-string values from database
+      const valueStr = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);
+
       let value: CacheEntry;
       try {
-        value = JSON.parse(rawValue as string);
+        value = JSON.parse(valueStr);
       } catch (e) {
-        this.log.warn('Failed to parse cache entry for URL:', url);
+        this.log.warn('Failed to parse cache entry for URL:', url, e);
         await this.delete(url);
         return false;
       }
@@ -258,7 +271,7 @@ export class CrawlerCache {
     try {
       const keys = await this.db.list('crawl:');
       if (keys && Array.isArray(keys)) {
-        const crawlKeys = keys.filter((key): key is string => 
+        const crawlKeys = keys.filter((key): key is string =>
           typeof key === 'string' && (key.startsWith('crawl:') || key.startsWith('full:'))
         );
         await Promise.all(crawlKeys.map(key => this.db.delete(key)));
