@@ -47,11 +47,23 @@ function generateCacheKey(key: string, prefix: string = CACHE_PREFIX): string {
 }
 
 function isValidCacheEntry(entry: unknown): entry is CacheEntry {
-  if (!entry || typeof entry !== 'object') return false;
+  if (!entry || typeof entry !== 'object') {
+    console.debug('[Cache] Entry validation failed: not an object');
+    return false;
+  }
+
   const e = entry as any;
+
+  // Log the actual structure for debugging
+  console.debug('[Cache] Validating entry structure:', {
+    hasUrl: typeof e.url === 'string',
+    hasResult: e.result !== undefined,
+    hasTimestamp: typeof e.timestamp === 'number',
+  });
+
   return (
     typeof e.url === 'string' &&
-    typeof e.result === 'object' &&
+    e.result !== undefined && // Just check if result exists
     typeof e.timestamp === 'number'
   );
 }
@@ -59,12 +71,25 @@ function isValidCacheEntry(entry: unknown): entry is CacheEntry {
 function isValidFullCrawlCacheEntry(
   entry: unknown
 ): entry is FullCrawlCacheEntry {
-  if (!entry || typeof entry !== 'object') return false;
+  if (!entry || typeof entry !== 'object') {
+    console.debug('[Cache] Full crawl entry validation failed: not an object');
+    return false;
+  }
+
   const e = entry as any;
+
+  // Log the actual structure for debugging
+  console.debug('[Cache] Validating full crawl entry structure:', {
+    hasStartUrl: typeof e.startUrl === 'string',
+    hasResults: Array.isArray(e.results),
+    hasSettings: e.settings !== undefined,
+    hasTimestamp: typeof e.timestamp === 'number',
+  });
+
   return (
     typeof e.startUrl === 'string' &&
     Array.isArray(e.results) &&
-    typeof e.settings === 'object' &&
+    e.settings !== undefined && // Just check if settings exists
     typeof e.timestamp === 'number'
   );
 }
@@ -93,14 +118,31 @@ export const crawlerCache = {
         const rawEntry = await db.get(key);
 
         // Handle null/undefined case explicitly
-        if (!rawEntry) return null;
+        if (!rawEntry) {
+          console.debug(`[Cache] No entry found for URL: ${url}`);
+          return null;
+        }
 
         // Parse the entry if it's a string (Replit DB sometimes returns stringified JSON)
-        const entry =
-          typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
+        let entry: unknown;
+        try {
+          entry =
+            typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
+          console.debug('[Cache] Successfully parsed entry:', {
+            type: typeof entry,
+            isString: typeof rawEntry === 'string',
+          });
+        } catch (parseError) {
+          console.warn('[Cache] Failed to parse entry:', parseError);
+          await db.delete(key);
+          return null;
+        }
 
         if (!isValidCacheEntry(entry)) {
-          console.warn(`[Cache] Invalid cache structure for URL: ${url}`);
+          console.warn(`[Cache] Invalid cache structure for URL: ${url}`, {
+            entry:
+              typeof entry === 'object' ? JSON.stringify(entry) : typeof entry,
+          });
           await db.delete(key);
           return null;
         }
@@ -108,6 +150,7 @@ export const crawlerCache = {
         // Check TTL
         const now = Date.now();
         if (now - entry.timestamp > CACHE_TTL) {
+          console.debug(`[Cache] Entry expired for URL: ${url}`);
           await db.delete(key);
           return null;
         }
