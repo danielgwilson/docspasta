@@ -76,15 +76,17 @@ export class CrawlerCache {
         return null;
       }
 
+      const entry = value as CacheEntry;
+
       // Check if entry has expired
-      if (Date.now() > value.expiresAt) {
+      if (Date.now() > entry.expiresAt) {
         this.log.debug('Cache expired for URL:', url);
         await this.delete(url);
         return null;
       }
 
       this.log.info('Cache hit for URL:', url);
-      return value.result;
+      return entry.result;
     } catch (error) {
       this.log.error('Cache get error:', error);
       return null;
@@ -120,13 +122,16 @@ export class CrawlerCache {
     try {
       const key = generateCacheKey(startUrl, 'full');
       const entry: FullCrawlCache = {
-        results,
+        results: results.map(result => ({
+          ...result,
+          status: result.status === 'skipped' ? 'complete' : result.status
+        })),
         timestamp: Date.now(),
         expiresAt: Date.now() + this.ttl,
         settings,
       };
 
-      await this.db.set(key, entry);
+      await this.db.set(key, JSON.stringify(entry));
       this.log.info('Cached full crawl results for starting URL:', startUrl, 'with', results.length, 'pages');
     } catch (error) {
       this.log.error('Full crawl cache set error:', error);
@@ -139,37 +144,44 @@ export class CrawlerCache {
   async getCrawlResults(startUrl: string, settings: Record<string, any>): Promise<PageResult[] | null> {
     try {
       const key = generateCacheKey(startUrl, 'full');
-      const value = await this.db.get(key);
+      const rawValue = await this.db.get(key);
 
-      if (!value || typeof value !== 'object') {
+      if (!rawValue) {
         this.log.debug('No cached crawl results for URL:', startUrl);
         return null;
       }
 
-      const cache = value as unknown as FullCrawlCache;
+      let value: FullCrawlCache;
+      try {
+        value = JSON.parse(rawValue as string);
+      } catch (e) {
+        this.log.warn('Failed to parse cached value for URL:', startUrl);
+        await this.db.delete(key);
+        return null;
+      }
 
       // Validate cache structure
-      if (!Array.isArray(cache.results) || !cache.timestamp || !cache.expiresAt || !cache.settings) {
+      if (!this.isValidFullCrawlCache(value)) {
         this.log.warn('Invalid cache structure for URL:', startUrl);
         await this.db.delete(key);
         return null;
       }
 
-      if (Date.now() > cache.expiresAt) {
+      if (Date.now() > value.expiresAt) {
         this.log.debug('Cached crawl results expired for URL:', startUrl);
         await this.db.delete(key);
         return null;
       }
 
       // Compare settings to ensure cache validity
-      const settingsMatch = JSON.stringify(settings) === JSON.stringify(cache.settings);
+      const settingsMatch = JSON.stringify(settings) === JSON.stringify(value.settings);
       if (!settingsMatch) {
         this.log.debug('Cached crawl settings mismatch for URL:', startUrl);
         return null;
       }
 
       this.log.info('Cache hit for full crawl of URL:', startUrl);
-      return cache.results;
+      return value.results;
     } catch (error) {
       this.log.error('Get crawl results error:', error);
       return null;
@@ -196,8 +208,10 @@ export class CrawlerCache {
         return false;
       }
 
+      const entry = value as CacheEntry;
+
       // Check expiration
-      if (Date.now() > value.expiresAt) {
+      if (Date.now() > entry.expiresAt) {
         this.log.debug('Cache entry expired for URL:', url);
         await this.delete(url);
         return false;
@@ -252,10 +266,31 @@ export class CrawlerCache {
     const entry = value as Partial<CacheEntry>;
     return (
       entry.result !== undefined &&
+      typeof entry.result === 'object' &&
       entry.timestamp !== undefined &&
-      entry.expiresAt !== undefined &&
       typeof entry.timestamp === 'number' &&
+      entry.expiresAt !== undefined &&
       typeof entry.expiresAt === 'number'
+    );
+  }
+
+  /**
+   * Type guard to validate full crawl cache structure
+   */
+  private isValidFullCrawlCache(value: unknown): value is FullCrawlCache {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const cache = value as Partial<FullCrawlCache>;
+    return (
+      Array.isArray(cache.results) &&
+      cache.timestamp !== undefined &&
+      typeof cache.timestamp === 'number' &&
+      cache.expiresAt !== undefined &&
+      typeof cache.expiresAt === 'number' &&
+      cache.settings !== undefined &&
+      typeof cache.settings === 'object'
     );
   }
 }
