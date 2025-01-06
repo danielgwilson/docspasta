@@ -15,9 +15,13 @@ interface FullCrawlCacheEntry {
   timestamp: number;
 }
 
-// Initialize Replit DB with proper error handling
+// Try to initialize Replit DB, fall back to in-memory if not available
 let db: Database | null = null;
-let useMemoryCache = false;
+try {
+  db = new Database();
+} catch (error) {
+  console.warn('[Cache] Replit DB not available, using in-memory cache');
+}
 
 // In-memory cache fallback
 const memoryCache = new Map<string, CacheEntry>();
@@ -26,21 +30,6 @@ const memoryCrawlCache = new Map<string, FullCrawlCacheEntry>();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_PREFIX = 'crawl:';
 const FULL_CACHE_PREFIX = 'full:';
-
-// Retry configuration
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // 1 second
-
-// Initialize database
-try {
-  console.log('[Cache] Attempting to initialize Replit DB');
-  db = new Database(); // Replit will automatically use the correct URL
-  console.log('[Cache] Successfully initialized Replit DB');
-} catch (error) {
-  console.error('[Cache] Fatal error during database initialization:', error);
-  useMemoryCache = true;
-  db = null;
-}
 
 function generateCacheKey(key: string, prefix: string = CACHE_PREFIX): string {
   return `${prefix}${key}`;
@@ -56,7 +45,9 @@ function isValidCacheEntry(entry: unknown): entry is CacheEntry {
   );
 }
 
-function isValidFullCrawlCacheEntry(entry: unknown): entry is FullCrawlCacheEntry {
+function isValidFullCrawlCacheEntry(
+  entry: unknown
+): entry is FullCrawlCacheEntry {
   if (!entry || typeof entry !== 'object') return false;
   const e = entry as any;
   return (
@@ -71,11 +62,13 @@ function compareSettings(
   a: Required<CrawlerOptions>,
   b: Required<CrawlerOptions>
 ): boolean {
+  // Only compare the fields that affect crawling behavior
   const relevantFields: (keyof Required<CrawlerOptions>)[] = [
     'maxDepth',
     'followExternalLinks',
     'excludeNavigation',
   ];
+
   return relevantFields.every((field) => a[field] === b[field]);
 }
 
@@ -83,56 +76,45 @@ function normalizeStatus(status: PageResult['status']): 'complete' | 'error' {
   return status === 'skipped' ? 'complete' : status;
 }
 
-// Retry wrapper for database operations
-async function retryOperation<T>(operation: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      console.error(`[Cache] Operation attempt ${attempt} failed:`, error);
-
-      if (attempt === MAX_RETRIES) {
-        console.error('[Cache] Max retries reached, operation failed');
-        useMemoryCache = true;
-        throw error;
-      }
-
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
-    }
-  }
-
-  throw new Error('Unexpected retry loop exit');
-}
-
 export const crawlerCache = {
   async get(url: string): Promise<PageResult | null> {
-    if (!db || useMemoryCache) {
-      console.log('[Cache] Using memory cache for get operation');
-      const entry = memoryCache.get(url);
-      if (!entry || Date.now() - entry.timestamp > CACHE_TTL) {
-        return null;
-      }
-      return {
-        ...entry.result,
-        status: normalizeStatus(entry.result.status),
-      };
-    }
-
     try {
-      const key = generateCacheKey(url);
-      console.log('[Cache] Fetching from database:', key);
-      const entry = await retryOperation(() => db!.get(key));
+      if (db) {
+        const key = generateCacheKey(url);
+        const rawEntry = await db.get(key);
 
-      if (!isValidCacheEntry(entry) || Date.now() - entry.timestamp > CACHE_TTL) {
-        console.log('[Cache] Invalid or expired entry for:', key);
-        return null;
+        if (!isValidCacheEntry(rawEntry)) {
+          return null;
+        }
+
+        // Check TTL
+        const now = Date.now();
+        if (now - rawEntry.timestamp > CACHE_TTL) {
+          return null;
+        }
+
+        return {
+          ...rawEntry.result,
+          status: normalizeStatus(rawEntry.result.status),
+        };
+      } else {
+        const entry = memoryCache.get(url);
+        if (!entry || !isValidCacheEntry(entry)) {
+          return null;
+        }
+
+        // Check TTL
+        const now = Date.now();
+        if (now - entry.timestamp > CACHE_TTL) {
+          memoryCache.delete(url);
+          return null;
+        }
+
+        return {
+          ...entry.result,
+          status: normalizeStatus(entry.result.status),
+        };
       }
-
-      console.log('[Cache] Successfully retrieved entry for:', key);
-      return {
-        ...entry.result,
-        status: normalizeStatus(entry.result.status),
-      };
     } catch (error) {
       console.error('[Cache] Error getting entry:', error);
       return null;
@@ -140,26 +122,21 @@ export const crawlerCache = {
   },
 
   async set(url: string, result: PageResult): Promise<void> {
-    const entry: CacheEntry = {
-      url,
-      result,
-      timestamp: Date.now(),
-    };
-
-    if (!db || useMemoryCache) {
-      console.log('[Cache] Using memory cache for set operation');
-      memoryCache.set(url, entry);
-      return;
-    }
-
     try {
-      const key = generateCacheKey(url);
-      console.log('[Cache] Setting database entry:', key);
-      await retryOperation(() => db!.set(key, entry));
-      console.log('[Cache] Successfully set entry for:', key);
+      const entry: CacheEntry = {
+        url,
+        result,
+        timestamp: Date.now(),
+      };
+
+      if (db) {
+        const key = generateCacheKey(url);
+        await db.set(key, entry);
+      } else {
+        memoryCache.set(url, entry);
+      }
     } catch (error) {
-      console.error('[Cache] Error setting entry, falling back to memory cache:', error);
-      memoryCache.set(url, entry);
+      console.error('[Cache] Error setting entry:', error);
     }
   },
 
@@ -167,35 +144,39 @@ export const crawlerCache = {
     startUrl: string,
     settings: Required<CrawlerOptions>
   ): Promise<PageResult[] | null> {
-    if (!db || useMemoryCache) {
-      console.log('[Cache] Using memory cache for crawl results');
-      const entry = memoryCrawlCache.get(startUrl);
-      if (!entry || 
-          !isValidFullCrawlCacheEntry(entry) || 
-          Date.now() - entry.timestamp > CACHE_TTL ||
-          !compareSettings(settings, entry.settings)) {
-        return null;
-      }
-      return entry.results.map(result => ({
-        ...result,
-        status: normalizeStatus(result.status),
-      }));
-    }
-
     try {
-      const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
-      console.log('[Cache] Fetching crawl results from database:', key);
-      const entry = await retryOperation(() => db!.get(key));
+      let entry: FullCrawlCacheEntry | null = null;
 
-      if (!isValidFullCrawlCacheEntry(entry) || 
-          Date.now() - entry.timestamp > CACHE_TTL ||
-          !compareSettings(settings, entry.settings)) {
-        console.log('[Cache] Invalid or expired crawl results for:', key);
+      if (db) {
+        const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
+        const rawEntry = await db.get(key);
+
+        if (!isValidFullCrawlCacheEntry(rawEntry)) {
+          return null;
+        }
+
+        // Check TTL
+        const now = Date.now();
+        if (now - rawEntry.timestamp > CACHE_TTL) {
+          return null;
+        }
+
+        entry = rawEntry;
+      } else {
+        entry = memoryCrawlCache.get(startUrl) ?? null;
+      }
+
+      if (!entry || !isValidFullCrawlCacheEntry(entry)) {
         return null;
       }
 
-      console.log('[Cache] Successfully retrieved crawl results for:', key);
-      return entry.results.map(result => ({
+      // Compare only relevant settings that affect crawling behavior
+      if (!compareSettings(settings, entry.settings)) {
+        return null;
+      }
+
+      // Normalize any 'skipped' statuses to 'complete'
+      return entry.results.map((result) => ({
         ...result,
         status: normalizeStatus(result.status),
       }));
@@ -210,53 +191,42 @@ export const crawlerCache = {
     results: PageResult[],
     settings: Required<CrawlerOptions>
   ): Promise<void> {
-    const entry: FullCrawlCacheEntry = {
-      startUrl,
-      results,
-      settings,
-      timestamp: Date.now(),
-    };
-
-    if (!db || useMemoryCache) {
-      console.log('[Cache] Using memory cache for setting crawl results');
-      memoryCrawlCache.set(startUrl, entry);
-      return;
-    }
-
     try {
-      const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
-      console.log('[Cache] Setting crawl results in database:', key);
-      await retryOperation(() => db!.set(key, entry));
-      console.log('[Cache] Successfully set crawl results for:', key);
+      const entry: FullCrawlCacheEntry = {
+        startUrl,
+        results,
+        settings,
+        timestamp: Date.now(),
+      };
+
+      if (db) {
+        const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
+        await db.set(key, entry);
+      } else {
+        memoryCrawlCache.set(startUrl, entry);
+      }
     } catch (error) {
-      console.error('[Cache] Error setting crawl results, falling back to memory cache:', error);
-      memoryCrawlCache.set(startUrl, entry);
+      console.error('[Cache] Error setting crawl results:', error);
     }
   },
 
   async clear(): Promise<void> {
-    if (!db || useMemoryCache) {
-      console.log('[Cache] Clearing memory cache');
-      memoryCache.clear();
-      memoryCrawlCache.clear();
-      return;
-    }
-
     try {
-      console.log('[Cache] Clearing database cache');
-      const keys = await retryOperation(() => db!.list());
-      const crawlKeys = Array.isArray(keys) ? keys.filter(
-        key => key.startsWith(CACHE_PREFIX) || key.startsWith(FULL_CACHE_PREFIX)
-      ) : [];
-
-      await Promise.all(
-        crawlKeys.map(key => retryOperation(() => db!.delete(key)))
-      );
-      console.log('[Cache] Successfully cleared database cache');
+      if (db) {
+        const keys = await db.list();
+        // Handle Replit DB response
+        const keyList = Array.isArray(keys) ? keys : [];
+        const crawlKeys = keyList.filter(
+          (key: string) =>
+            key.startsWith(CACHE_PREFIX) || key.startsWith(FULL_CACHE_PREFIX)
+        );
+        await Promise.all(crawlKeys.map((key: string) => db!.delete(key)));
+      } else {
+        memoryCache.clear();
+        memoryCrawlCache.clear();
+      }
     } catch (error) {
-      console.error('[Cache] Error clearing cache, falling back to memory cache:', error);
-      memoryCache.clear();
-      memoryCrawlCache.clear();
+      console.error('[Cache] Error clearing cache:', error);
     }
   },
 };
