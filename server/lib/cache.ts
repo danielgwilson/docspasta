@@ -15,12 +15,23 @@ interface FullCrawlCacheEntry {
   timestamp: number;
 }
 
-// Try to initialize Replit DB, fall back to in-memory if not available
+// Check if we're running in a Replit environment
+const isReplit = process.env.REPL_ID && process.env.REPL_OWNER;
+
+// Initialize database with proper error handling
 let db: Database | null = null;
-try {
-  db = new Database();
-} catch (error) {
-  console.warn('[Cache] Replit DB not available, using in-memory cache');
+if (isReplit) {
+  try {
+    db = new Database();
+    console.log('[Cache] Successfully initialized Replit DB');
+  } catch (error) {
+    console.warn('[Cache] Failed to initialize Replit DB:', error);
+    console.warn('[Cache] Falling back to in-memory cache');
+  }
+} else {
+  console.log(
+    '[Cache] Not running in Replit environment, using in-memory cache'
+  );
 }
 
 // In-memory cache fallback
@@ -62,13 +73,11 @@ function compareSettings(
   a: Required<CrawlerOptions>,
   b: Required<CrawlerOptions>
 ): boolean {
-  // Only compare the fields that affect crawling behavior
   const relevantFields: (keyof Required<CrawlerOptions>)[] = [
     'maxDepth',
     'followExternalLinks',
     'excludeNavigation',
   ];
-
   return relevantFields.every((field) => a[field] === b[field]);
 }
 
@@ -83,25 +92,33 @@ export const crawlerCache = {
         const key = generateCacheKey(url);
         const rawEntry = await db.get(key);
 
-        if (!isValidCacheEntry(rawEntry)) {
+        // Handle null/undefined case explicitly
+        if (!rawEntry) return null;
+
+        // Parse the entry if it's a string (Replit DB sometimes returns stringified JSON)
+        const entry =
+          typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
+
+        if (!isValidCacheEntry(entry)) {
+          console.warn(`[Cache] Invalid cache structure for URL: ${url}`);
+          await db.delete(key);
           return null;
         }
 
         // Check TTL
         const now = Date.now();
-        if (now - rawEntry.timestamp > CACHE_TTL) {
+        if (now - entry.timestamp > CACHE_TTL) {
+          await db.delete(key);
           return null;
         }
 
         return {
-          ...rawEntry.result,
-          status: normalizeStatus(rawEntry.result.status),
+          ...entry.result,
+          status: normalizeStatus(entry.result.status),
         };
       } else {
         const entry = memoryCache.get(url);
-        if (!entry || !isValidCacheEntry(entry)) {
-          return null;
-        }
+        if (!entry) return null;
 
         // Check TTL
         const now = Date.now();
@@ -131,7 +148,8 @@ export const crawlerCache = {
 
       if (db) {
         const key = generateCacheKey(url);
-        await db.set(key, entry);
+        // Explicitly stringify the entry for Replit DB
+        await db.set(key, JSON.stringify(entry));
       } else {
         memoryCache.set(url, entry);
       }
@@ -151,31 +169,40 @@ export const crawlerCache = {
         const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
         const rawEntry = await db.get(key);
 
-        if (!isValidFullCrawlCacheEntry(rawEntry)) {
+        // Handle null/undefined case explicitly
+        if (!rawEntry) return null;
+
+        // Parse the entry if it's a string
+        const parsedEntry =
+          typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
+
+        if (!isValidFullCrawlCacheEntry(parsedEntry)) {
+          console.warn(
+            `[Cache] Invalid full crawl cache structure for URL: ${startUrl}`
+          );
+          await db.delete(key);
           return null;
         }
 
         // Check TTL
         const now = Date.now();
-        if (now - rawEntry.timestamp > CACHE_TTL) {
+        if (now - parsedEntry.timestamp > CACHE_TTL) {
+          await db.delete(key);
           return null;
         }
 
-        entry = rawEntry;
+        entry = parsedEntry;
       } else {
         entry = memoryCrawlCache.get(startUrl) ?? null;
       }
 
-      if (!entry || !isValidFullCrawlCacheEntry(entry)) {
-        return null;
-      }
+      if (!entry) return null;
 
-      // Compare only relevant settings that affect crawling behavior
+      // Compare settings
       if (!compareSettings(settings, entry.settings)) {
         return null;
       }
 
-      // Normalize any 'skipped' statuses to 'complete'
       return entry.results.map((result) => ({
         ...result,
         status: normalizeStatus(result.status),
@@ -201,7 +228,8 @@ export const crawlerCache = {
 
       if (db) {
         const key = generateCacheKey(startUrl, FULL_CACHE_PREFIX);
-        await db.set(key, entry);
+        // Explicitly stringify the entry for Replit DB
+        await db.set(key, JSON.stringify(entry));
       } else {
         memoryCrawlCache.set(startUrl, entry);
       }
@@ -215,7 +243,7 @@ export const crawlerCache = {
       if (db) {
         const keys = await db.list();
         // Handle Replit DB response
-        const keyList = Array.isArray(keys) ? keys : [];
+        const keyList = Array.isArray(keys) ? keys : Object.keys(keys);
         const crawlKeys = keyList.filter(
           (key: string) =>
             key.startsWith(CACHE_PREFIX) || key.startsWith(FULL_CACHE_PREFIX)
