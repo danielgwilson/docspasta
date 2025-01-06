@@ -37,18 +37,23 @@ export class CrawlerCache {
       const key = generateCacheKey(url);
       const value = await db.get(key);
 
-      // Handle null case explicitly
-      if (!value) return null;
+      if (!value) {
+        return null;
+      }
 
-      const entry = value as CacheEntry;
-
-      // Check if entry has expired
-      if (Date.now() > entry.expiresAt) {
+      // Type guard to ensure value is a CacheEntry
+      if (!this.isValidCacheEntry(value)) {
         await this.delete(url);
         return null;
       }
 
-      return entry.result;
+      // Check if entry has expired
+      if (Date.now() > value.expiresAt) {
+        await this.delete(url);
+        return null;
+      }
+
+      return value.result;
     } catch (error) {
       console.error('Cache get error:', error);
       return null;
@@ -64,7 +69,7 @@ export class CrawlerCache {
       const entry: CacheEntry = {
         result: {
           ...result,
-          status: result.status === 'skipped' ? 'complete' : result.status // Convert skipped to complete for cache
+          status: result.status === 'skipped' ? 'complete' : result.status
         },
         timestamp: Date.now(),
         expiresAt: Date.now() + this.ttl
@@ -84,13 +89,18 @@ export class CrawlerCache {
       const key = generateCacheKey(url);
       const value = await db.get(key);
 
-      // Handle null case explicitly
-      if (!value) return false;
+      if (!value) {
+        return false;
+      }
 
-      const entry = value as CacheEntry;
+      // Type guard to ensure value is a CacheEntry
+      if (!this.isValidCacheEntry(value)) {
+        await this.delete(url);
+        return false;
+      }
 
       // Check expiration
-      if (Date.now() > entry.expiresAt) {
+      if (Date.now() > value.expiresAt) {
         await this.delete(url);
         return false;
       }
@@ -119,11 +129,32 @@ export class CrawlerCache {
    */
   async clear(): Promise<void> {
     try {
-      const keys = (await db.list('crawl:')) as unknown[];
-      await Promise.all(keys.map(key => db.delete(key as string)));
+      const keys = await db.list();
+      const crawlKeys = keys.filter((key): key is string => 
+        typeof key === 'string' && key.startsWith('crawl:')
+      );
+      await Promise.all(crawlKeys.map(key => db.delete(key)));
     } catch (error) {
       console.error('Cache clear error:', error);
     }
+  }
+
+  /**
+   * Type guard to validate cache entry structure
+   */
+  private isValidCacheEntry(value: unknown): value is CacheEntry {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const entry = value as Partial<CacheEntry>;
+    return (
+      entry.result !== undefined &&
+      entry.timestamp !== undefined &&
+      entry.expiresAt !== undefined &&
+      typeof entry.timestamp === 'number' &&
+      typeof entry.expiresAt === 'number'
+    );
   }
 }
 
