@@ -28,9 +28,135 @@ const log = {
 
 // Create JSDOM instance with secure configuration
 const jsdom = new JSDOM('', {
-  runScripts: 'outside-only',
+  runScripts: 'dangerously',
   resources: 'usable',
   url: 'http://localhost',
+  beforeParse(window) {
+    // Block execution of scripts from crawled content
+    window.eval = () => {
+      throw new Error('Script execution disabled');
+    };
+    // @ts-ignore - Intentionally disable WebAssembly
+    window.WebAssembly = undefined;
+    window.requestAnimationFrame = () => 0;
+    window.cancelAnimationFrame = () => {};
+    window.requestIdleCallback = () => 0;
+    window.cancelIdleCallback = () => {};
+    window.matchMedia = () => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    });
+
+    // Prevent network requests
+    window.fetch = () => Promise.reject(new Error('Network requests disabled'));
+    // @ts-ignore - Intentionally disable XMLHttpRequest
+    window.XMLHttpRequest = undefined;
+    // @ts-ignore - Intentionally disable WebSocket
+    window.WebSocket = undefined;
+
+    // Prevent navigation
+    window.location = new Proxy(window.location, {
+      set: () => true, // Silently ignore navigation attempts
+    });
+  },
+});
+
+// Add browser API mocks
+const mockMatchMedia = (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => {},
+  removeListener: () => {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  dispatchEvent: () => false,
+});
+
+// Mock window properties and methods
+Object.defineProperties(jsdom.window, {
+  matchMedia: {
+    writable: true,
+    value: mockMatchMedia,
+  },
+  innerWidth: {
+    writable: true,
+    value: 1024,
+  },
+  innerHeight: {
+    writable: true,
+    value: 768,
+  },
+  devicePixelRatio: {
+    writable: true,
+    value: 1,
+  },
+});
+
+// Mock document methods
+jsdom.window.document.createRange = () => ({
+  setStart: () => {},
+  setEnd: () => {},
+  commonAncestorContainer: jsdom.window.document.body,
+  // Add required Range properties
+  collapsed: true,
+  startContainer: jsdom.window.document.body,
+  endContainer: jsdom.window.document.body,
+  startOffset: 0,
+  endOffset: 0,
+  selectNode: () => {},
+  selectNodeContents: () => {},
+  insertNode: () => {},
+  surroundContents: () => {},
+  cloneContents: () => jsdom.window.document.createDocumentFragment(),
+  extractContents: () => jsdom.window.document.createDocumentFragment(),
+  deleteContents: () => {},
+  cloneRange: () => jsdom.window.document.createRange(),
+  toString: () => '',
+  detach: () => {},
+  expand: () => {},
+  compareBoundaryPoints: () => 0,
+  comparePoint: () => 0,
+  createContextualFragment: (html: string) => {
+    const template = jsdom.window.document.createElement('template');
+    template.innerHTML = html;
+    return template.content;
+  },
+  getBoundingClientRect: () => ({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    toJSON: () => ({}),
+  }),
+  getClientRects: () => ({
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: function* () {},
+  }),
+  intersectsNode: () => false,
+  isPointInRange: () => false,
+  // Add remaining required Range methods
+  collapse: () => {},
+  setEndAfter: () => {},
+  setEndBefore: () => {},
+  setStartAfter: () => {},
+  setStartBefore: () => {},
+  isEqual: () => false,
+  END_TO_END: 2,
+  END_TO_START: 3,
+  START_TO_END: 1,
+  START_TO_START: 0,
 });
 
 // Configure Turndown with better settings
