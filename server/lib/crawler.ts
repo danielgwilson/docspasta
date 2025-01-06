@@ -48,6 +48,7 @@ export class DocumentationCrawler {
   private errors: Map<string, Error> = new Map();
   private onProgress?: (result: PageResult) => void;
   private results: PageResult[] = [];
+  private startUrl: string;
 
   constructor(
     startUrl: string,
@@ -55,6 +56,7 @@ export class DocumentationCrawler {
     onProgress?: (result: PageResult) => void
   ) {
     log.info('Initializing crawler for', startUrl);
+    this.startUrl = startUrl;
 
     // Set default options
     this.options = {
@@ -321,6 +323,19 @@ export class DocumentationCrawler {
     log.info('Starting crawl');
 
     try {
+      // Check for cached full crawl results first
+      const cachedResults = await crawlerCache.getCrawlResults(this.startUrl, this.options);
+      if (cachedResults) {
+        log.info('Using cached crawl results for:', this.startUrl);
+
+        // Send progress updates for cached results
+        for (const result of cachedResults) {
+          this.onProgress?.(result);
+        }
+
+        return cachedResults;
+      }
+
       await this.queue.onIdle();
       const timeElapsed = Date.now() - this.startTime;
 
@@ -332,10 +347,15 @@ export class DocumentationCrawler {
       });
 
       // Sort results by depth and then URL for consistency
-      return this.results.sort((a, b) => {
+      const sortedResults = this.results.sort((a, b) => {
         if (a.depth !== b.depth) return a.depth - b.depth;
         return a.url.localeCompare(b.url);
       });
+
+      // Cache the complete crawl results
+      await crawlerCache.setCrawlResults(this.startUrl, sortedResults, this.options);
+
+      return sortedResults;
     } catch (error) {
       log.error('Fatal crawl error:', error);
       throw error;
@@ -345,7 +365,6 @@ export class DocumentationCrawler {
     }
   }
 
-  // Helper method to get current progress
   public getProgress(): {
     visited: number;
     errors: number;
