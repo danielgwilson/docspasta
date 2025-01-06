@@ -123,14 +123,29 @@ export const crawlerCache = {
           return null;
         }
 
-        // Parse the entry if it's a string (Replit DB sometimes returns stringified JSON)
+        // Parse the entry handling Replit DB's nested structure
         let entry: unknown;
         try {
+          // First handle the possible {ok, value} wrapper
+          let parsedValue = rawEntry;
+          if (
+            typeof rawEntry === 'object' &&
+            'value' in rawEntry &&
+            rawEntry.value
+          ) {
+            console.debug('[Cache] Found Replit DB wrapper structure');
+            parsedValue = rawEntry.value;
+          }
+
+          // Then parse any remaining string JSON
           entry =
-            typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
+            typeof parsedValue === 'string'
+              ? JSON.parse(parsedValue)
+              : parsedValue;
+
           console.debug('[Cache] Successfully parsed entry:', {
             type: typeof entry,
-            isString: typeof rawEntry === 'string',
+            structure: entry ? Object.keys(entry as object) : null,
           });
         } catch (parseError) {
           console.warn('[Cache] Failed to parse entry:', parseError);
@@ -142,6 +157,10 @@ export const crawlerCache = {
           console.warn(`[Cache] Invalid cache structure for URL: ${url}`, {
             entry:
               typeof entry === 'object' ? JSON.stringify(entry) : typeof entry,
+            rawEntry:
+              typeof rawEntry === 'object'
+                ? JSON.stringify(rawEntry)
+                : typeof rawEntry,
           });
           await db.delete(key);
           return null;
