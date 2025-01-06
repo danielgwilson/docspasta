@@ -37,13 +37,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const PORT = Number(process.env.PORT) || 3000;
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    log(`serving on port ${PORT}`);
-  });
-
-  // Use the router for /api routes
-  app.use('/api', registerRoutes);
+  const server = registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -61,4 +55,11 @@ app.use((req, res, next) => {
   } else {
     serveStatic(app);
   }
+
+  // ALWAYS serve the app on port 5000
+  // this serves both the API and the client
+  const PORT = 5000;
+  server.listen(PORT, '0.0.0.0', () => {
+    log(`serving on port ${PORT}`);
+  });
 })();

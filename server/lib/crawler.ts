@@ -229,8 +229,8 @@ export class DocumentationCrawler {
         depth,
         title: 'Max Depth Reached',
         timestamp: Date.now(),
-        content: '', //Added to satisfy PageResult type
-        error: '', //Added to satisfy PageResult type
+        content: '',
+        error: '',
       };
       this.results.push(result);
       this.onProgress?.(result);
@@ -289,7 +289,7 @@ export class DocumentationCrawler {
         title: document.title,
         content: markdown,
         timestamp: Date.now(),
-        error: '', //Added to satisfy PageResult type
+        error: '',
       };
 
       // Cache the successful result
@@ -306,9 +306,8 @@ export class DocumentationCrawler {
         depth,
         error: error instanceof Error ? error.message : String(error),
         timestamp: Date.now(),
-        content: '', //Added to satisfy PageResult type
-        title: '', //Added to satisfy PageResult type
-
+        content: '',
+        title: '',
       };
 
       this.errors.set(url, error instanceof Error ? error : new Error(String(error)));

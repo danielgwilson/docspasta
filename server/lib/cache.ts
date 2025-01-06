@@ -2,7 +2,14 @@ import Database from '@replit/database';
 import type { PageResult } from '../../client/src/lib/types';
 import crypto from 'crypto';
 
-const db = new Database();
+// Initialize database with error handling
+let db: Database | null = null;
+try {
+  db = new Database();
+} catch (error) {
+  console.error('Failed to initialize Replit Database:', error);
+  throw new Error('Failed to initialize database. Please check your configuration.');
+}
 
 /**
  * Generate a cache key for a URL
@@ -24,8 +31,13 @@ export interface CacheEntry {
 
 export class CrawlerCache {
   private ttl: number;
+  private db: Database;
 
   constructor(ttlHours: number = 24) {
+    if (!db) {
+      throw new Error('Database not initialized');
+    }
+    this.db = db;
     this.ttl = ttlHours * 60 * 60 * 1000; // Convert hours to milliseconds
   }
 
@@ -35,7 +47,7 @@ export class CrawlerCache {
   async get(url: string): Promise<PageResult | null> {
     try {
       const key = generateCacheKey(url);
-      const value = await db.get(key);
+      const value = await this.db.get(key);
 
       if (!value) {
         return null;
@@ -75,7 +87,7 @@ export class CrawlerCache {
         expiresAt: Date.now() + this.ttl
       };
 
-      await db.set(key, entry);
+      await this.db.set(key, entry);
     } catch (error) {
       console.error('Cache set error:', error);
     }
@@ -87,7 +99,7 @@ export class CrawlerCache {
   async has(url: string): Promise<boolean> {
     try {
       const key = generateCacheKey(url);
-      const value = await db.get(key);
+      const value = await this.db.get(key);
 
       if (!value) {
         return false;
@@ -118,7 +130,7 @@ export class CrawlerCache {
   async delete(url: string): Promise<void> {
     try {
       const key = generateCacheKey(url);
-      await db.delete(key);
+      await this.db.delete(key);
     } catch (error) {
       console.error('Cache delete error:', error);
     }
@@ -129,11 +141,13 @@ export class CrawlerCache {
    */
   async clear(): Promise<void> {
     try {
-      const keys = await db.list();
-      const crawlKeys = keys.filter((key): key is string => 
-        typeof key === 'string' && key.startsWith('crawl:')
-      );
-      await Promise.all(crawlKeys.map(key => db.delete(key)));
+      const keys = await this.db.list('crawl:');
+      if (keys && Array.isArray(keys)) {
+        const crawlKeys = keys.filter((key): key is string => 
+          typeof key === 'string' && key.startsWith('crawl:')
+        );
+        await Promise.all(crawlKeys.map(key => this.db.delete(key)));
+      }
     } catch (error) {
       console.error('Cache clear error:', error);
     }
