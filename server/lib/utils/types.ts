@@ -21,7 +21,7 @@ export interface PageNode {
 }
 
 export interface PageResult {
-  status: 'complete' | 'error';
+  status: 'complete' | 'error' | 'skipped';
   url: string;
   title?: string;
   content?: string;
