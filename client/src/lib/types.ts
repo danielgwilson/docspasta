@@ -1,16 +1,23 @@
-import { z } from 'zod';
+export {
+  PageResult,
+  CrawlerOptions,
+  PageNode,
+  CrawlMetadata,
+  CodeBlock,
+} from '../../../shared/types';
 
-export interface PageResult {
+// Additional client-specific types
+export interface CrawlHistoryEntry {
   url: string;
   title: string;
-  content: string | null;
-  status: 'complete' | 'error' | 'skipped';
+  timestamp: number;
+  pageCount: number;
 }
 
-export interface CrawlSettings {
-  maxPages?: number;
-  maxDepth?: number;
-  includePatterns?: string[];
-  excludePatterns?: string[];
-  timeout?: number;
+export interface CrawlState {
+  isLoading: boolean;
+  error: string | null;
+  results: PageResult[];
+  startUrl: string | null;
+  title: string | null;
 }

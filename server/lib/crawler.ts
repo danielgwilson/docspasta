@@ -2,7 +2,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import TurndownService from 'turndown';
 import pQueue from 'p-queue';
 import { crawlerCache } from './cache';
-import type { PageResult } from '../../client/src/lib/types';
+import type { PageResult, CrawlerOptions, PageNode } from '../../shared/types';
 
 // Create logger helper
 const log = {
@@ -23,21 +23,6 @@ const turndownService = new TurndownService({
   br: '  \n',
 });
 
-interface CrawlerOptions {
-  maxDepth?: number;
-  maxConcurrentRequests?: number;
-  rateLimit?: number;
-  timeout?: number;
-  followExternalLinks?: boolean;
-  excludeNavigation?: boolean;
-}
-
-interface PageNode {
-  url: string;
-  depth: number;
-  parent?: string;
-}
-
 export class DocumentationCrawler {
   private visited = new Set<string>();
   private queued = new Set<string>();
@@ -49,6 +34,7 @@ export class DocumentationCrawler {
   private onProgress?: (result: PageResult) => void;
   private results: PageResult[] = [];
   private startUrl: string;
+  private contentHashes = new Map<string, string>(); // Track content hashes
 
   constructor(
     startUrl: string,
@@ -64,8 +50,11 @@ export class DocumentationCrawler {
       maxConcurrentRequests: options.maxConcurrentRequests ?? 5,
       rateLimit: options.rateLimit ?? 1000,
       timeout: options.timeout ?? 30000,
+      maxRetries: options.maxRetries ?? 3,
       followExternalLinks: options.followExternalLinks ?? false,
-      excludeNavigation: options.excludeNavigation ?? true,
+      excludeNavigation: options.excludeNavigation ?? false,
+      includeCodeBlocks: options.includeCodeBlocks ?? true,
+      includeAnchors: options.includeAnchors ?? false,
     };
 
     try {
@@ -74,11 +63,13 @@ export class DocumentationCrawler {
       this.startTime = Date.now();
       this.onProgress = onProgress;
 
-      // Initialize queue with concurrency control
+      // Initialize queue with strict rate limiting
       this.queue = new pQueue({
-        concurrency: this.options.maxConcurrentRequests,
+        concurrency: 1, // Process one request at a time
         interval: this.options.rateLimit,
-        intervalCap: 1,
+        intervalCap: 1, // Only allow 1 request per interval
+        autoStart: false,
+        timeout: this.options.timeout,
       });
 
       // Add initial URL
@@ -90,30 +81,76 @@ export class DocumentationCrawler {
   }
 
   private queueUrl(node: PageNode): void {
-    const { url } = node;
+    const { url, depth } = node;
     if (!this.queued.has(url) && !this.visited.has(url)) {
-      log.debug(`Queueing URL at depth ${node.depth}:`, url);
+      log.debug(`Queueing URL at depth ${depth}:`, url);
       this.queued.add(url);
       this.queue.add(() => this.processUrl(node));
     }
   }
 
   private async fetchWithRetry(url: string): Promise<string> {
-    try {
-      const response = await fetch(url, {
-        headers: { 'User-Agent': 'Documentation Crawler Bot' },
-        signal: AbortSignal.timeout(this.options.timeout),
-      });
+    let lastError: Error | null = null;
+    const maxRetries = this.options.maxRetries ?? 3;
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    for (let i = 0; i < maxRetries; i++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        this.options.timeout
+      );
+
+      try {
+        const parsedUrl = new URL(url);
+        const response = await fetch(parsedUrl.href, {
+          headers: {
+            'User-Agent': 'Documentation Crawler Bot',
+            Accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const contentType = response.headers.get('content-type');
+        if (
+          !contentType?.includes('text/html') &&
+          !contentType?.includes('application/xhtml+xml')
+        ) {
+          throw new Error(`Invalid content type: ${contentType}`);
+        }
+
+        const text = await response.text();
+        if (!text.trim()) {
+          throw new Error('Empty response');
+        }
+
+        return text;
+      } catch (error) {
+        lastError = error as Error;
+        log.error('Fetch error:', error);
+        if (
+          error instanceof TypeError &&
+          error.message.includes('Invalid URL')
+        ) {
+          throw error; // Don't retry invalid URLs
+        }
+        if (i < maxRetries - 1) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.pow(2, i) * 1000)
+          );
+          continue;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      return await response.text();
-    } catch (error) {
-      log.error('Error fetching URL:', url, error);
-      throw error;
     }
+
+    throw lastError ?? new Error('Failed to fetch after retries');
   }
 
   private extractLinks(
@@ -125,6 +162,11 @@ export class DocumentationCrawler {
     const nodes: PageNode[] = [];
     const seenUrls = new Set<string>();
 
+    // Only extract links if we haven't reached maxDepth
+    if (depth >= this.options.maxDepth) {
+      return nodes;
+    }
+
     for (const link of links) {
       const href = link.getAttribute('href');
       if (!href?.trim() || href.startsWith('javascript:')) {
@@ -134,26 +176,35 @@ export class DocumentationCrawler {
       try {
         // Handle anchor links
         if (href.startsWith('#')) {
+          if (this.options.includeAnchors) {
+            const url = `${baseUrl}${href}`;
+            if (!seenUrls.has(url)) {
+              seenUrls.add(url);
+              nodes.push({
+                url,
+                depth: depth + 1,
+                parent: baseUrl,
+              });
+            }
+          }
           continue;
         }
 
-        const url = new URL(href, baseUrl).href;
-        const urlObj = new URL(url);
+        // Normalize URL
+        const url = new URL(href, baseUrl);
+        const normalizedUrl = url.href.split('#')[0]; // Remove hash
+        const finalUrl = normalizedUrl.endsWith('/')
+          ? normalizedUrl.slice(0, -1)
+          : normalizedUrl;
 
-        // Remove hash/fragment for deduplication
-        const urlWithoutHash = url.split('#')[0];
-
-        // Skip if we've seen this URL (ignoring hash)
-        if (seenUrls.has(urlWithoutHash)) {
+        // Skip if we've seen this URL
+        if (seenUrls.has(finalUrl)) {
           continue;
         }
-        seenUrls.add(urlWithoutHash);
+        seenUrls.add(finalUrl);
 
         // Skip external links if not enabled
-        if (
-          !this.options.followExternalLinks &&
-          urlObj.origin !== this.baseUrl
-        ) {
+        if (!this.options.followExternalLinks && url.origin !== this.baseUrl) {
           continue;
         }
 
@@ -168,11 +219,12 @@ export class DocumentationCrawler {
         }
 
         nodes.push({
-          url: urlWithoutHash,
+          url: finalUrl,
           depth: depth + 1,
           parent: baseUrl,
         });
       } catch (error) {
+        // Skip invalid URLs
         continue;
       }
     }
@@ -180,189 +232,281 @@ export class DocumentationCrawler {
     return nodes;
   }
 
-  private findMainElement(doc: Document): Element {
-    const selectors = [
-      'main',
-      'article',
-      '[role="main"]',
-      '.main-content',
-      '.content',
-      '.article',
-      '.documentation',
-      '.docs-content',
-      '#main-content',
-      '#content',
-    ];
-
-    for (const selector of selectors) {
-      const element = doc.querySelector(selector);
-      if (element) return element;
-    }
-
-    return doc.body;
-  }
-
-  private cleanContent(element: Element): void {
-    const unwantedSelectors = [
-      'script',
-      'style',
-      'iframe',
-      'noscript',
-      '[aria-hidden="true"]',
-      '.hidden',
-      '.display-none',
-    ];
-
-    unwantedSelectors.forEach((selector) => {
-      element.querySelectorAll(selector).forEach((el) => el.remove());
-    });
-  }
-
   private async processUrl(node: PageNode): Promise<PageResult> {
-    const { url, depth } = node;
+    const { url, depth, parent } = node;
     log.info('Processing URL:', url, 'at depth', depth);
 
-    // Check depth before processing
-    if (depth > this.options.maxDepth) {
-      log.debug('Skipping - max depth reached:', url, depth);
-      const result: PageResult = {
+    // Check if we've already visited this URL
+    if (this.visited.has(url)) {
+      return {
         url,
         status: 'skipped',
         depth,
-        title: 'Max Depth Reached',
+        title: 'Already Visited',
         timestamp: Date.now(),
         content: '',
         error: '',
+        newLinksFound: 0,
+        hierarchy: [],
+        parent,
       };
-      this.results.push(result);
-      this.onProgress?.(result);
-      return result;
     }
 
-    // Check cache first
-    const cachedResult = await crawlerCache.get(url);
-    if (cachedResult) {
-      log.info('Cache hit for URL:', url);
-      this.visited.add(url);
-      this.queued.delete(url);
-
-      // Update depth and timestamp for the cached result
-      const result: PageResult = {
-        ...cachedResult,
-        depth,
-        timestamp: Date.now(),
-      };
-      this.results.push(result);
-      this.onProgress?.(result);
-      return result;
-    }
-
-    // Mark as visited at the start of processing
+    // Mark as visited before processing to prevent cycles
     this.visited.add(url);
     this.queued.delete(url);
 
     try {
       const html = await this.fetchWithRetry(url);
+      const virtualConsole = new VirtualConsole();
       const dom = new JSDOM(html, {
         url,
-        virtualConsole: new VirtualConsole(),
-        runScripts: 'dangerously',
-        resources: 'usable',
+        virtualConsole,
+        pretendToBeVisual: true,
       });
 
-      const document = dom.window.document;
-      const mainElement = this.findMainElement(document);
-      this.cleanContent(mainElement);
+      const doc = dom.window.document;
+      const title = doc.title || this.extractTitle(doc) || url;
+      const mainContent = this.extractContent(doc);
+      const markdown = turndownService.turndown(mainContent);
+      const hierarchy = this.extractHierarchy(doc, title);
+      const contentHash = this.hashContent(markdown);
 
-      const markdown = turndownService.turndown(mainElement.innerHTML);
+      // Extract links and queue them
+      const links = this.extractLinks(doc, url, depth);
+      let newLinksFound = 0;
 
-      // Extract links before completing
+      // Queue child links if we haven't reached max depth
       if (depth < this.options.maxDepth) {
-        const links = this.extractLinks(document, url, depth);
         for (const link of links) {
-          this.queueUrl(link);
+          if (!this.visited.has(link.url) && !this.queued.has(link.url)) {
+            this.queueUrl(link);
+            newLinksFound++;
+          }
         }
       }
+
+      // Check for duplicate content
+      for (const [existingUrl, existingHash] of Array.from(
+        this.contentHashes.entries()
+      )) {
+        if (existingHash === contentHash && existingUrl !== url) {
+          log.info('Found duplicate content:', url, 'matches', existingUrl);
+          const result: PageResult = {
+            url,
+            status: 'error',
+            depth,
+            title,
+            timestamp: Date.now(),
+            content: '',
+            error: `Duplicate content: same as ${existingUrl}`,
+            newLinksFound,
+            hierarchy: [],
+            parent,
+            links: links.map((l) => l.url),
+          };
+          this.results.push(result);
+          this.onProgress?.(result);
+          return result;
+        }
+      }
+
+      // Store content hash
+      this.contentHashes.set(url, contentHash);
 
       const result: PageResult = {
         url,
         status: 'complete',
         depth,
-        title: document.title,
+        title,
         content: markdown,
         timestamp: Date.now(),
         error: '',
+        newLinksFound,
+        hierarchy,
+        parent,
+        links: links.map((l) => l.url),
       };
 
-      // Cache the successful result
-      await crawlerCache.set(url, result);
-
-      log.info('Successfully processed:', url);
       this.results.push(result);
       this.onProgress?.(result);
+
       return result;
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      log.error('Error processing URL:', url, errorMessage);
+
       const result: PageResult = {
         url,
         status: 'error',
         depth,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: Date.now(),
+        title: 'Error',
         content: '',
-        title: '',
+        timestamp: Date.now(),
+        error: errorMessage,
+        newLinksFound: 0,
+        hierarchy: [],
+        parent,
       };
 
-      this.errors.set(url, error instanceof Error ? error : new Error(String(error)));
+      this.errors.set(url, error as Error);
       this.results.push(result);
       this.onProgress?.(result);
+
       return result;
     }
   }
 
+  private extractTitle(doc: Document): string {
+    // Try h1 first
+    const h1 = doc.querySelector('h1');
+    if (h1?.textContent) {
+      return h1.textContent.trim();
+    }
+
+    // Try meta title
+    const metaTitle = doc.querySelector('meta[name="title"]');
+    if (metaTitle?.getAttribute('content')) {
+      return metaTitle.getAttribute('content')!.trim();
+    }
+
+    // Try og:title
+    const ogTitle = doc.querySelector('meta[property="og:title"]');
+    if (ogTitle?.getAttribute('content')) {
+      return ogTitle.getAttribute('content')!.trim();
+    }
+
+    return '';
+  }
+
+  private extractContent(doc: Document): string {
+    // Try to find main content area
+    const mainContent = doc.querySelector(
+      'main, article, .content, #content, .main, #main'
+    );
+    if (mainContent) {
+      // Remove navigation, header, footer elements if configured
+      if (this.options.excludeNavigation) {
+        ['nav', 'header', 'footer'].forEach((selector) => {
+          mainContent.querySelectorAll(selector).forEach((el) => el.remove());
+        });
+      }
+      return mainContent.innerHTML;
+    }
+
+    // Fallback to body
+    const body = doc.querySelector('body');
+    if (body) {
+      // Remove navigation, header, footer elements if configured
+      if (this.options.excludeNavigation) {
+        ['nav', 'header', 'footer'].forEach((selector) => {
+          body.querySelectorAll(selector).forEach((el) => el.remove());
+        });
+      }
+      return body.innerHTML;
+    }
+
+    return '';
+  }
+
+  private extractHierarchy(doc: Document, pageTitle: string): string[] {
+    const hierarchy: string[] = [];
+
+    // Add page title
+    if (pageTitle) {
+      hierarchy.push(pageTitle);
+    }
+
+    // Add section headings
+    const headings = Array.from(doc.querySelectorAll('h1, h2, h3'));
+    for (const heading of headings) {
+      const text = heading.textContent?.trim();
+      if (text && !hierarchy.includes(text)) {
+        hierarchy.push(text);
+      }
+    }
+
+    // Add parent hierarchy if available
+    const parentUrl = this.results.find(
+      (r) => r.url === doc.location.href
+    )?.parent;
+    if (parentUrl) {
+      const parentResult = this.results.find((r) => r.url === parentUrl);
+      if (parentResult?.hierarchy) {
+        hierarchy.unshift(...parentResult.hierarchy);
+      }
+    }
+
+    return hierarchy;
+  }
+
+  private hashContent(content: string): string {
+    // Normalize content before hashing
+    const normalized = content
+      .replace(/\s+/g, ' ')
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+      .trim()
+      .toLowerCase();
+
+    // Simple hash function for content comparison
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const char = normalized.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return hash.toString(36);
+  }
+
   public async crawl(): Promise<PageResult[]> {
     log.info('Starting crawl');
+    this.queue.start();
 
     try {
-      // Check for cached full crawl results first
-      const cachedResults = await crawlerCache.getCrawlResults(this.startUrl, this.options);
-      if (cachedResults) {
-        log.info('Using cached crawl results for:', this.startUrl);
-
-        // Send progress updates for cached results
-        for (const result of cachedResults) {
-          this.onProgress?.(result);
-        }
-
-        return cachedResults;
+      // Process all queued URLs
+      while (this.queue.size > 0 || this.queue.pending > 0) {
+        await this.queue.onIdle();
+        // Add a small delay to allow new URLs to be queued
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
 
-      await this.queue.onIdle();
+      // Get final stats
       const timeElapsed = Date.now() - this.startTime;
-
-      log.info('Crawl completed:', {
+      const stats = {
         visited: this.visited.size,
         errors: this.errors.size,
         timeElapsed,
         totalResults: this.results.length,
-      });
+      };
+      log.info('Crawl completed:', stats);
 
-      // Sort results by depth and then URL for consistency
-      const sortedResults = this.results.sort((a, b) => {
-        if (a.depth !== b.depth) return a.depth - b.depth;
-        return a.url.localeCompare(b.url);
-      });
+      // Sort results by URL for consistency
+      const sortedResults = [...this.results].sort((a, b) =>
+        a.url.localeCompare(b.url)
+      );
 
-      // Cache the complete crawl results
-      await crawlerCache.setCrawlResults(this.startUrl, sortedResults, this.options);
+      // Cleanup
+      this.cleanup();
+      log.info('Crawl cleanup complete');
 
       return sortedResults;
     } catch (error) {
-      log.error('Fatal crawl error:', error);
+      log.error('Crawl failed:', error);
       throw error;
     } finally {
-      this.queue.clear();
-      log.info('Crawl cleanup complete');
+      this.queue.pause();
     }
+  }
+
+  private cleanup(): void {
+    // Clear internal state
+    this.visited.clear();
+    this.queued.clear();
+    this.contentHashes.clear();
+    this.errors.clear();
+    this.queue.clear();
   }
 
   public getProgress(): {
