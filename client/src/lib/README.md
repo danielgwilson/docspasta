@@ -12,12 +12,12 @@ An advanced web-based documentation crawler that intelligently processes, extrac
 
 ## Content Processing Strategy
 
-### 1. Main Content Identification
 - Prioritizes semantic HTML elements (`<main>`, `<article>`)
 - Falls back to documentation-specific class names (`.docs-content`, `.markdown-body`)
 - Uses content heuristics for fallback (multiple paragraphs, headers, code blocks)
 
 ### 2. Navigation Element Handling
+
 - Identifies navigation elements through:
   - Semantic markup (`<nav>`, `role="navigation"`)
   - Common class patterns (`.navigation`, `.menu`, `.sidebar`)
@@ -26,12 +26,14 @@ An advanced web-based documentation crawler that intelligently processes, extrac
 - Preserves important navigation when part of main content
 
 ### 3. Duplicate Detection
+
 - Generates fingerprints for content sections
 - Only applies to navigation and repeated elements
 - Preserves unique content even if structure is similar
 - Uses placeholders for common elements (navigation, footer)
 
 ### 4. Content Cleaning
+
 - Preserves essential elements:
   - Headers (h1-h6)
   - Paragraphs
@@ -47,6 +49,7 @@ An advanced web-based documentation crawler that intelligently processes, extrac
   - Empty/decorative elements
 
 ### 5. Whitespace Handling
+
 - Maintains semantic whitespace:
   - Paragraph separation
   - List formatting

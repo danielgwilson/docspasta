@@ -63,11 +63,6 @@ A robust documentation crawler implementation for processing, caching, and testi
 - [Crawler Architecture](../decisions/crawler-architecture.md)
 - [Testing Plan](../decisions/test-plan.md) 
 
-
-
-
-
-
 ## Quick Start for New Engineers
 1. Read these docs in order:
    - Features: `/topics/features/crawler.md`
