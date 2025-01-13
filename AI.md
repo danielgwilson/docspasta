@@ -28,7 +28,7 @@ DocsPasta is a documentation crawler and processor that makes documentation sear
 
 ## Directory Structure
 
-```
+```sh
 .docs/
 ├── ai-notes/
 │   ├── _templates/    # Use these for new docs
@@ -41,4 +41,4 @@ DocsPasta is a documentation crawler and processor that makes documentation sear
 - Frontend: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS
 - Backend: Node.js, Express.js, TypeScript
 - Database: Supabase (PostgreSQL)
-- Testing: Vitest 
+- Testing: Vitest

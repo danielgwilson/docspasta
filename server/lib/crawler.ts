@@ -65,7 +65,7 @@ export class DocumentationCrawler {
 
     // Merge options with defaults
     this.options = {
-      maxDepth: options.maxDepth ?? 3,
+      maxDepth: options.maxDepth ?? 1,
       maxConcurrentRequests: options.maxConcurrentRequests ?? 10,
       rateLimit: options.rateLimit ?? 500,
       timeout: options.timeout ?? 30000,
