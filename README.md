@@ -1,4 +1,4 @@
-**# 🍝 DocsPasta
+# 🍝 DocsPasta
 
 A modern documentation crawler and processor that makes documentation searchable and accessible. DocsPasta intelligently crawls, processes, and organizes documentation from various sources, making it easier to find and use the information you need.
 
@@ -101,6 +101,7 @@ graph TB
 The crawler is built around three main components:
 
 1. **Queue Management**
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -126,7 +127,8 @@ sequenceDiagram
     Crawler-->>Client: Complete Results
 ```
 
-2. **Content Processing Pipeline**
+1. **Content Processing Pipeline**
+
 ```mermaid
 flowchart LR
     A[Raw HTML] --> B[JSDOM Parser]
@@ -138,7 +140,8 @@ flowchart LR
     G --> H[Deduplication]
 ```
 
-3. **Caching Strategy**
+1. **Caching Strategy**
+
 - Version-aware caching
 - Content-based invalidation
 - Request deduplication
@@ -187,4 +190,4 @@ npm run test:ui
 
 ## 📄 License
 
-MIT License - see [LICENSE](./LICENSE) for details **
+MIT License - see [LICENSE](./LICENSE) for details

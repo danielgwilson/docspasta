@@ -32,7 +32,7 @@ describe('DocumentationCrawler', () => {
     mockServer.reset();
     await crawlerCache.clear();
     vi.clearAllMocks();
-    crawlerCache.setMaxAge(50); // Short cache expiry for testing
+    crawlerCache.setMaxAge(50); // short expiry for testing
   });
 
   afterEach(() => {
@@ -45,7 +45,7 @@ describe('DocumentationCrawler', () => {
       const crawler = new DocumentationCrawler('https://test.com', {
         maxDepth: 0,
         maxConcurrentRequests: 1,
-        timeout: 1000, // Shorter timeout for tests
+        timeout: 1000, // shorter for tests
       });
 
       const results = await crawler.crawl();
@@ -63,7 +63,7 @@ describe('DocumentationCrawler', () => {
       const crawler = new DocumentationCrawler('https://test.com', {
         maxDepth: 1,
         maxConcurrentRequests: 1,
-        timeout: 1000, // Shorter timeout for tests
+        timeout: 1000, // shorter for tests
       });
 
       const results = await crawler.crawl();
@@ -156,7 +156,7 @@ describe('DocumentationCrawler', () => {
       const results = await crawler2.crawl();
       expect(results).toHaveLength(1);
       expect(results[0].status).toBe('complete');
-      expect(mockServer.getRequestCount('https://test.com')).toBe(1);
+      expect(mockServer.getRequestCount('https://test.com')).toEqual(1);
     });
 
     it('should handle cache invalidation correctly', async () => {
@@ -201,7 +201,7 @@ describe('DocumentationCrawler', () => {
       await crawler.crawl();
       const duration = Date.now() - startTime;
 
-      // With 3 pages and 100ms rate limit, should take at least 300ms
+      // With 3 pages and 100ms rate limit, should be >= 300ms
       expect(duration).toBeGreaterThanOrEqual(300);
     });
 

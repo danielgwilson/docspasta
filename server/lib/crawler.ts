@@ -6,10 +6,10 @@ import type { PageResult, CrawlerOptions, PageNode } from '../../shared/types';
 
 // Create logger helper
 const log = {
-  debug: (...args: any[]) => console.debug('[Crawler]', ...args),
-  info: (...args: any[]) => console.info('[Crawler]', ...args),
-  warn: (...args: any[]) => console.warn('[Crawler]', ...args),
-  error: (...args: any[]) => console.error('[Crawler]', ...args),
+  debug: (...args: unknown[]) => console.debug('[Crawler]', ...args),
+  info: (...args: unknown[]) => console.info('[Crawler]', ...args),
+  warn: (...args: unknown[]) => console.warn('[Crawler]', ...args),
+  error: (...args: unknown[]) => console.error('[Crawler]', ...args),
 };
 
 // Configure Turndown with better settings
@@ -23,6 +23,10 @@ const turndownService = new TurndownService({
   br: '  \n',
 });
 
+/**
+ * A documentation crawler that crawls a site starting from `startUrl`,
+ * extracting content, following links, and producing a set of PageResults.
+ */
 export class DocumentationCrawler {
   private visited = new Set<string>();
   private queued = new Set<string>();
@@ -36,6 +40,12 @@ export class DocumentationCrawler {
   private startUrl: string;
   private contentHashes = new Map<string, string>(); // Track content hashes
 
+  /**
+   * Creates an instance of DocumentationCrawler.
+   * @param startUrl - The initial URL to crawl.
+   * @param options - The crawler settings.
+   * @param onProgress - Optional callback for receiving progress updates.
+   */
   constructor(
     startUrl: string,
     options: CrawlerOptions = {},
@@ -50,11 +60,13 @@ export class DocumentationCrawler {
       maxConcurrentRequests: options.maxConcurrentRequests ?? 5,
       rateLimit: options.rateLimit ?? 1000,
       timeout: options.timeout ?? 30000,
-      maxRetries: options.maxRetries ?? 3,
       followExternalLinks: options.followExternalLinks ?? false,
       excludeNavigation: options.excludeNavigation ?? false,
       includeCodeBlocks: options.includeCodeBlocks ?? true,
       includeAnchors: options.includeAnchors ?? false,
+      // Additional internal option for number of retries
+      // (not in the original zod schema, so we handle fallback manually)
+      maxRetries: (options as any).maxRetries ?? 3,
     };
 
     try {
@@ -63,11 +75,11 @@ export class DocumentationCrawler {
       this.startTime = Date.now();
       this.onProgress = onProgress;
 
-      // Initialize queue with strict rate limiting
+      // Initialize queue with concurrency and rate limiting
       this.queue = new pQueue({
-        concurrency: 1, // Process one request at a time
+        concurrency: this.options.maxConcurrentRequests,
         interval: this.options.rateLimit,
-        intervalCap: 1, // Only allow 1 request per interval
+        intervalCap: this.options.maxConcurrentRequests,
         autoStart: false,
         timeout: this.options.timeout,
       });
@@ -80,6 +92,10 @@ export class DocumentationCrawler {
     }
   }
 
+  /**
+   * Adds a page node (URL + depth) to the queue if not already visited or queued.
+   * @param node - The PageNode to queue for processing.
+   */
   private queueUrl(node: PageNode): void {
     const { url, depth } = node;
     if (!this.queued.has(url) && !this.visited.has(url)) {
@@ -89,6 +105,11 @@ export class DocumentationCrawler {
     }
   }
 
+  /**
+   * Fetches a URL with retry logic.
+   * @param url - The URL to fetch.
+   * @returns The response text if successful.
+   */
   private async fetchWithRetry(url: string): Promise<string> {
     let lastError: Error | null = null;
     const maxRetries = this.options.maxRetries ?? 3;
@@ -116,10 +137,10 @@ export class DocumentationCrawler {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const contentType = response.headers.get('content-type');
+        const contentType = response.headers.get('content-type') ?? '';
         if (
-          !contentType?.includes('text/html') &&
-          !contentType?.includes('application/xhtml+xml')
+          !contentType.includes('text/html') &&
+          !contentType.includes('application/xhtml+xml')
         ) {
           throw new Error(`Invalid content type: ${contentType}`);
         }
@@ -137,9 +158,11 @@ export class DocumentationCrawler {
           error instanceof TypeError &&
           error.message.includes('Invalid URL')
         ) {
-          throw error; // Don't retry invalid URLs
+          // If it's an invalid URL, no need to retry.
+          throw error;
         }
         if (i < maxRetries - 1) {
+          // Exponential backoff
           await new Promise((resolve) =>
             setTimeout(resolve, Math.pow(2, i) * 1000)
           );
@@ -153,6 +176,13 @@ export class DocumentationCrawler {
     throw lastError ?? new Error('Failed to fetch after retries');
   }
 
+  /**
+   * Extracts links from the DOM of the current document to queue them for further crawling.
+   * @param doc - The DOM document.
+   * @param baseUrl - The base URL of the current document.
+   * @param depth - The current depth in the crawl.
+   * @returns An array of child PageNode items.
+   */
   private extractLinks(
     doc: Document,
     baseUrl: string,
@@ -177,11 +207,11 @@ export class DocumentationCrawler {
         // Handle anchor links
         if (href.startsWith('#')) {
           if (this.options.includeAnchors) {
-            const url = `${baseUrl}${href}`;
-            if (!seenUrls.has(url)) {
-              seenUrls.add(url);
+            const anchorUrl = `${baseUrl}${href}`;
+            if (!seenUrls.has(anchorUrl)) {
+              seenUrls.add(anchorUrl);
               nodes.push({
-                url,
+                url: anchorUrl,
                 depth: depth + 1,
                 parent: baseUrl,
               });
@@ -190,9 +220,9 @@ export class DocumentationCrawler {
           continue;
         }
 
-        // Normalize URL
-        const url = new URL(href, baseUrl);
-        const normalizedUrl = url.href.split('#')[0]; // Remove hash
+        // Normalize and remove the fragment
+        const urlObj = new URL(href, baseUrl);
+        const normalizedUrl = urlObj.href.split('#')[0];
         const finalUrl = normalizedUrl.endsWith('/')
           ? normalizedUrl.slice(0, -1)
           : normalizedUrl;
@@ -204,7 +234,10 @@ export class DocumentationCrawler {
         seenUrls.add(finalUrl);
 
         // Skip external links if not enabled
-        if (!this.options.followExternalLinks && url.origin !== this.baseUrl) {
+        if (
+          !this.options.followExternalLinks &&
+          urlObj.origin !== this.baseUrl
+        ) {
           continue;
         }
 
@@ -223,7 +256,7 @@ export class DocumentationCrawler {
           depth: depth + 1,
           parent: baseUrl,
         });
-      } catch (error) {
+      } catch {
         // Skip invalid URLs
         continue;
       }
@@ -232,6 +265,12 @@ export class DocumentationCrawler {
     return nodes;
   }
 
+  /**
+   * Processes a single URL from the queue: fetches, parses, extracts content,
+   * and enqueues child links.
+   * @param node - The PageNode representing the current URL and depth.
+   * @returns A PageResult representing the outcome (success, error, or skipped).
+   */
   private async processUrl(node: PageNode): Promise<PageResult> {
     const { url, depth, parent } = node;
     log.info('Processing URL:', url, 'at depth', depth);
@@ -276,7 +315,6 @@ export class DocumentationCrawler {
       const links = this.extractLinks(doc, url, depth);
       let newLinksFound = 0;
 
-      // Queue child links if we haven't reached max depth
       if (depth < this.options.maxDepth) {
         for (const link of links) {
           if (!this.visited.has(link.url) && !this.queued.has(link.url)) {
@@ -358,6 +396,12 @@ export class DocumentationCrawler {
     }
   }
 
+  /**
+   * Attempts to extract a title from the DOM by checking <h1>, meta[name="title"],
+   * or meta[property="og:title"] elements.
+   * @param doc - The DOM document.
+   * @returns The extracted title or an empty string.
+   */
   private extractTitle(doc: Document): string {
     // Try h1 first
     const h1 = doc.querySelector('h1');
@@ -380,13 +424,18 @@ export class DocumentationCrawler {
     return '';
   }
 
+  /**
+   * Extracts the main content from the DOM, optionally removing navigation,
+   * header, and footer elements.
+   * @param doc - The DOM document.
+   * @returns Inner HTML of the selected main content, or an empty string.
+   */
   private extractContent(doc: Document): string {
     // Try to find main content area
     const mainContent = doc.querySelector(
       'main, article, .content, #content, .main, #main'
     );
     if (mainContent) {
-      // Remove navigation, header, footer elements if configured
       if (this.options.excludeNavigation) {
         ['nav', 'header', 'footer'].forEach((selector) => {
           mainContent.querySelectorAll(selector).forEach((el) => el.remove());
@@ -398,7 +447,6 @@ export class DocumentationCrawler {
     // Fallback to body
     const body = doc.querySelector('body');
     if (body) {
-      // Remove navigation, header, footer elements if configured
       if (this.options.excludeNavigation) {
         ['nav', 'header', 'footer'].forEach((selector) => {
           body.querySelectorAll(selector).forEach((el) => el.remove());
@@ -410,6 +458,13 @@ export class DocumentationCrawler {
     return '';
   }
 
+  /**
+   * Constructs a hierarchy array from the page's top-level heading plus
+   * any <h1>, <h2>, <h3> elements, and merges with parent page hierarchy if any.
+   * @param doc - The DOM document.
+   * @param pageTitle - The fallback page title.
+   * @returns An array of heading texts.
+   */
   private extractHierarchy(doc: Document, pageTitle: string): string[] {
     const hierarchy: string[] = [];
 
@@ -427,7 +482,7 @@ export class DocumentationCrawler {
       }
     }
 
-    // Add parent hierarchy if available
+    // Attempt to merge parent hierarchy
     const parentUrl = this.results.find(
       (r) => r.url === doc.location.href
     )?.parent;
@@ -441,6 +496,11 @@ export class DocumentationCrawler {
     return hierarchy;
   }
 
+  /**
+   * Hashes the content to detect potential duplicates.
+   * @param content - The content string (post-turndown).
+   * @returns A simple 32-bit integer hash in base-36 for deduplication.
+   */
   private hashContent(content: string): string {
     // Normalize content before hashing
     const normalized = content
@@ -450,16 +510,19 @@ export class DocumentationCrawler {
       .trim()
       .toLowerCase();
 
-    // Simple hash function for content comparison
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
       const char = normalized.charCodeAt(i);
       hash = (hash << 5) - hash + char;
-      hash = hash & hash;
+      hash |= 0; // Convert to 32bit integer
     }
     return hash.toString(36);
   }
 
+  /**
+   * Begins processing of all queued URLs. Waits until all have been processed or skipped.
+   * @returns A sorted array of PageResults by URL.
+   */
   public async crawl(): Promise<PageResult[]> {
     log.info('Starting crawl');
     this.queue.start();
@@ -500,6 +563,9 @@ export class DocumentationCrawler {
     }
   }
 
+  /**
+   * Cleans up internal state after the crawl completes or fails.
+   */
   private cleanup(): void {
     // Clear internal state
     this.visited.clear();
@@ -509,6 +575,11 @@ export class DocumentationCrawler {
     this.queue.clear();
   }
 
+  /**
+   * Returns current progress about visited URLs, error count, queue status,
+   * number of results, and time elapsed.
+   * @returns A progress object with relevant metrics.
+   */
   public getProgress(): {
     visited: number;
     errors: number;

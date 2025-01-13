@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/**
+ * Zod schema describing crawler options, with defaults
+ * for convenience.
+ */
 export const crawlerOptionsSchema = z.object({
   maxDepth: z.number().int().positive().default(3),
   includeCodeBlocks: z.boolean().default(true),
@@ -11,25 +15,49 @@ export const crawlerOptionsSchema = z.object({
   includeAnchors: z.boolean().default(false),
 });
 
+/** The raw (unvalidated) shape of crawler options. */
 export type CrawlerOptions = z.input<typeof crawlerOptionsSchema>;
+/** The validated and parsed shape of crawler options. */
 export type ValidatedCrawlerOptions = z.output<typeof crawlerOptionsSchema>;
 
+/**
+ * Basic node for representing a discovered page and its hierarchy in a crawl.
+ */
 export interface PageNode {
+  /** The full URL of the page. */
   url: string;
+  /** The depth in the crawl hierarchy, starting from 0. */
   depth: number;
+  /** The parent page's URL, if any. */
   parent?: string;
 }
 
+/**
+ * The result of crawling a page, including relevant metadata.
+ */
 export interface PageResult {
+  /** The current status of the crawl for this page. */
   status: 'complete' | 'error' | 'skipped';
+  /** The page's URL. */
   url: string;
+  /** The page's <title> or derived title, if available. */
   title?: string;
+  /** The extracted, processed content in Markdown format, if any. */
   content?: string;
+  /** The depth in the crawl hierarchy, starting from 0. */
   depth: number;
+  /** The parent page's URL, if any. */
   parent?: string;
+  /** An array of hierarchical headings encountered, if extracted. */
   hierarchy?: string[];
+  /** For anchor-based crawls, the anchor ID if relevant. */
   anchor?: string;
+  /** How many new child links were discovered during this page's processing. */
   newLinksFound?: number;
+  /** If the crawl encountered an error on this page, it's stored here. */
   error?: string;
+  /** Unix timestamp (ms) for when this page finished crawling. */
   timestamp: number;
+  /** List of child links found on this page. (Optional extension used in crawler) */
+  links?: string[];
 }

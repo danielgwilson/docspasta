@@ -34,7 +34,8 @@ describe('CrawlerCache', () => {
     const testUrl = 'https://test.com/invalid';
 
     // Store invalid data
-    await crawlerCache.set(testUrl, null as any);
+    // @ts-expect-error - Testing scenario
+    await crawlerCache.set(testUrl, null);
     const cached = await crawlerCache.get(testUrl);
 
     expect(cached).toBeNull();
@@ -104,7 +105,9 @@ describe('CrawlerCache', () => {
     };
 
     await crawlerCache.set(testUrl, oldResult);
-    await new Promise((resolve) => setTimeout(resolve, 100)); // Wait for cache to expire
+
+    // Wait for cache to expire
+    await new Promise((resolve) => setTimeout(resolve, 100));
     const cached = await crawlerCache.get(testUrl);
 
     // Should not return expired cache entries

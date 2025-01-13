@@ -14,6 +14,12 @@ interface MockResponse {
   body: string;
 }
 
+/**
+ * Sets up a mock server for testing crawler behavior,
+ * allowing you to define pages and error responses.
+ * @param initialPages - The initial pages to mock.
+ * @returns An object with helper methods to manipulate the mock server.
+ */
 export function setupMockServer(initialPages: MockPage[]) {
   const requestCounts = new Map<string, number>();
   const responses = new Map<string, MockResponse>();
@@ -108,6 +114,10 @@ export function setupMockServer(initialPages: MockPage[]) {
 
   return {
     server,
+    /**
+     * Resets the mock server state (response maps, request counts)
+     * back to the initial state.
+     */
     reset: () => {
       console.log('Resetting mock server...');
       requestCounts.clear();
@@ -146,6 +156,11 @@ export function setupMockServer(initialPages: MockPage[]) {
       server.resetHandlers(handler);
       console.log('Mock server reset complete');
     },
+    /**
+     * Adds a new normal response for the specified URL to the mock server.
+     * @param url - The URL to respond to.
+     * @param response - The mock response details.
+     */
     addResponse: (url: string, response: MockResponse) => {
       responses.set(url, {
         ...response,
@@ -155,9 +170,20 @@ export function setupMockServer(initialPages: MockPage[]) {
         },
       });
     },
+    /**
+     * Adds an error response that will be returned for the specified URL.
+     * @param url - The URL to respond to with an error.
+     * @param status - The HTTP status code.
+     * @param message - The error message body.
+     */
     addErrorResponse: (url: string, status: number, message: string) => {
       errorResponses.set(url, { status, message });
     },
+    /**
+     * Retrieves how many times the specified URL was requested.
+     * @param url - The URL to check.
+     * @returns The count of how many times the URL was requested.
+     */
     getRequestCount: (url: string) => requestCounts.get(url) || 0,
   };
 }

@@ -1,14 +1,20 @@
 import type { PageResult, CrawlerOptions } from '../../shared/types';
 
-// Create logger helper
+// Simple logger helper
 const log = {
-  debug: (...args: any[]) => console.debug('[Cache]', ...args),
-  info: (...args: any[]) => console.info('[Cache]', ...args),
-  warn: (...args: any[]) => console.warn('[Cache]', ...args),
-  error: (...args: any[]) => console.error('[Cache]', ...args),
+  debug: (...args: unknown[]) => console.debug('[Cache]', ...args),
+  info: (...args: unknown[]) => console.info('[Cache]', ...args),
+  warn: (...args: unknown[]) => console.warn('[Cache]', ...args),
+  error: (...args: unknown[]) => console.error('[Cache]', ...args),
 };
 
-// Cache implementation
+/**
+ * In-memory cache for individual page results and entire crawl results.
+ *
+ * @remarks
+ * This cache uses a simple Map-based in-memory approach with time-based
+ * invalidation and a version check to ensure older entries are discarded.
+ */
 class CrawlerCache {
   private cache: Map<
     string,
@@ -19,7 +25,7 @@ class CrawlerCache {
     { results: PageResult[]; timestamp: number; version: number }
   >;
   private readonly CURRENT_VERSION = 1;
-  private _maxAge = 24 * 60 * 60 * 1000; // 24 hours
+  private _maxAge = 24 * 60 * 60 * 1000; // 24 hours by default
 
   constructor() {
     this.cache = new Map();
@@ -27,15 +33,24 @@ class CrawlerCache {
     log.info('Cache initialized');
   }
 
-  // For testing purposes
+  /**
+   * For testing purposes: set a custom max age for the cache.
+   */
   setMaxAge(maxAge: number): void {
     this._maxAge = maxAge;
   }
 
+  /**
+   * Normalizes a URL key for usage in the page result cache.
+   */
   private generateCacheKey(url: string): string {
     return url.toLowerCase().trim();
   }
 
+  /**
+   * Generates a unique cache key for storing complete crawl results
+   * based on the startUrl plus a stringified version of the crawler settings.
+   */
   private generateCrawlCacheKey(
     startUrl: string,
     settings: Required<CrawlerOptions>
@@ -43,14 +58,23 @@ class CrawlerCache {
     return `${startUrl.toLowerCase().trim()}:${JSON.stringify(settings)}`;
   }
 
+  /**
+   * Checks if a given timestamp is older than the allowed max age.
+   */
   private isExpired(timestamp: number): boolean {
     return Date.now() - timestamp > this._maxAge;
   }
 
+  /**
+   * Checks if the cache version matches the current known version.
+   */
   private isValidVersion(version: number): boolean {
     return version === this.CURRENT_VERSION;
   }
 
+  /**
+   * Retrieves a single page result from cache if available and valid.
+   */
   async get(url: string): Promise<PageResult | null> {
     try {
       const key = this.generateCacheKey(url);
@@ -79,6 +103,9 @@ class CrawlerCache {
     }
   }
 
+  /**
+   * Stores a single page result in cache.
+   */
   async set(url: string, result: PageResult): Promise<void> {
     try {
       const key = this.generateCacheKey(url);
@@ -92,6 +119,9 @@ class CrawlerCache {
     }
   }
 
+  /**
+   * Retrieves the entire results of a crawl session based on a specific startUrl + settings.
+   */
   async getCrawlResults(
     startUrl: string,
     settings: Required<CrawlerOptions>
@@ -123,6 +153,9 @@ class CrawlerCache {
     }
   }
 
+  /**
+   * Stores the results of an entire crawl session for a given startUrl + settings.
+   */
   async setCrawlResults(
     startUrl: string,
     settings: Required<CrawlerOptions>,
@@ -140,6 +173,9 @@ class CrawlerCache {
     }
   }
 
+  /**
+   * Clears all cached items (both single page results and entire crawl results).
+   */
   clear(): void {
     this.cache.clear();
     this.crawlCache.clear();

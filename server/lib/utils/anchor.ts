@@ -1,4 +1,17 @@
+/**
+ * A utility class to help find relevant anchor IDs within DOM elements.
+ *
+ * @remarks
+ * This is particularly useful for mapping headings or elements in
+ * documentation to anchor-based navigation links.
+ */
 export class Anchor {
+  /**
+   * Retrieves the nearest anchor-like ID within a given DOM element.
+   *
+   * @param element - The DOM element to scan for anchor IDs.
+   * @returns The found anchor ID, or null if none is found.
+   */
   static getAnchor(element: Element): string | null {
     // Try to find the closest heading with an ID
     const heading = element.querySelector(
