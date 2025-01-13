@@ -65,7 +65,7 @@ export class DocumentationCrawler {
 
     // Merge options with defaults
     this.options = {
-      maxDepth: options.maxDepth ?? 1,
+      maxDepth: options.maxDepth ?? 2,
       maxConcurrentRequests: options.maxConcurrentRequests ?? 10,
       rateLimit: options.rateLimit ?? 500,
       timeout: options.timeout ?? 30000,
@@ -422,12 +422,15 @@ export class DocumentationCrawler {
         continue;
       }
 
-      // If it's an anchor (#blah) and user wants anchors
-      if (href.startsWith('#') && this.options.includeAnchors) {
-        const anchorUrl = `${baseUrl}${href}`;
-        if (!seenUrls.has(anchorUrl)) {
-          seenUrls.add(anchorUrl);
-          nodes.push({ url: anchorUrl, depth: depth + 1, parent: baseUrl });
+      // Handle pure anchor links (e.g., "#section")
+      if (href.startsWith('#')) {
+        if (this.options.includeAnchors) {
+          // Only store the anchor reference, don't queue for crawling
+          const anchorUrl = `${baseUrl}${href}`;
+          if (!seenUrls.has(anchorUrl)) {
+            seenUrls.add(anchorUrl);
+            // Note: We don't push to nodes[] since we don't want to crawl it
+          }
         }
         continue;
       }
@@ -436,7 +439,8 @@ export class DocumentationCrawler {
       const normalized = normalizeUrl(
         href,
         baseUrl,
-        this.options.followExternalLinks
+        this.options.followExternalLinks,
+        this.options.includeAnchors
       );
       if (!normalized) continue;
 
@@ -446,12 +450,16 @@ export class DocumentationCrawler {
           continue;
         }
 
-        if (!seenUrls.has(urlObj.href)) {
-          seenUrls.add(urlObj.href);
-          nodes.push({ url: urlObj.href, depth: depth + 1, parent: baseUrl });
+        if (!seenUrls.has(normalized)) {
+          seenUrls.add(normalized);
+          nodes.push({
+            url: normalized,
+            depth: depth + 1,
+            parent: baseUrl,
+          });
         }
       } catch {
-        // skip
+        // skip invalid URLs
       }
     }
 

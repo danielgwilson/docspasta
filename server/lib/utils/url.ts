@@ -2,17 +2,19 @@ import crypto from 'crypto';
 
 /**
  * Normalize a URL by resolving relative paths and removing trailing slashes.
- * Omits fragments unless it's an anchor link, and optionally discards external URLs.
+ * Optionally preserves fragments and handles external URLs.
  *
  * @param href - The raw URL to normalize.
  * @param baseUrl - The base URL (context) for resolving relative URLs.
  * @param followExternalLinks - If false, returns null for external origins.
+ * @param includeAnchors - If true, preserves URL fragments.
  * @returns The normalized URL string or null if invalid/out of scope.
  */
 export function normalizeUrl(
   href: string,
   baseUrl: string,
-  followExternalLinks: boolean
+  followExternalLinks: boolean,
+  includeAnchors: boolean = false
 ): string | null {
   try {
     const url = new URL(href, baseUrl);
@@ -21,9 +23,21 @@ export function normalizeUrl(
     // Remove trailing slash
     let normalized = url.href.replace(/\/$/, '');
 
-    // Remove fragments unless it's anchor-only
+    // Handle fragments based on settings
     if (!href.startsWith('#')) {
-      normalized = normalized.split('#')[0];
+      if (!includeAnchors) {
+        // Strip all fragments when includeAnchors is false
+        normalized = normalized.split('#')[0];
+      } else {
+        // When includeAnchors is true:
+        // 1. Keep complex fragments (e.g., #/v2/api, #!docs)
+        // 2. Strip simple section anchors (e.g., #overview, #section-1)
+        const fragment = url.hash;
+        const isSimpleSectionAnchor = /^#[\w-]+$/.test(fragment);
+        if (isSimpleSectionAnchor) {
+          normalized = normalized.split('#')[0];
+        }
+      }
     }
 
     // Handle external links if followExternalLinks is false

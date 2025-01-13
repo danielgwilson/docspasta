@@ -414,4 +414,142 @@ describe('DocumentationCrawler', () => {
       }
     );
   });
+
+  describe('Anchor Link Handling', () => {
+    it('should handle different types of anchor links correctly', async () => {
+      // Setup mock responses for different URL types
+      mockServer.addResponse('https://test.com/docs', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: `
+          <html>
+            <head><title>Documentation</title></head>
+            <body>
+              <main>
+                <h1>Documentation</h1>
+                <nav>
+                  <!-- Pure anchor link -->
+                  <a href="#section1">Section 1</a>
+                  
+                  <!-- URL with simple section anchor -->
+                  <a href="/docs/guide#overview">Guide Overview</a>
+                  
+                  <!-- URL with complex fragment (SPA-style) -->
+                  <a href="/docs/api#/v2/endpoints">API v2</a>
+                  
+                  <!-- Regular link without anchor -->
+                  <a href="/docs/guide">Full Guide</a>
+                </nav>
+              </main>
+            </body>
+          </html>
+        `,
+      });
+
+      // Add content for linked pages
+      mockServer.addResponse('https://test.com/docs/guide', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: '<html><body><main><h1>Guide</h1><p>Content</p></main></body></html>',
+      });
+
+      mockServer.addResponse('https://test.com/docs/api', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: '<html><body><main><h1>API</h1><p>Content</p></main></body></html>',
+      });
+
+      // Test with includeAnchors enabled
+      const crawler = new DocumentationCrawler('https://test.com/docs', {
+        maxDepth: 2,
+        includeAnchors: true,
+      });
+
+      const results = await crawler.crawl();
+
+      // Verify results
+      expect(results).toBeDefined();
+
+      // Get all URLs that were crawled
+      const crawledUrls = results.map((r) => r.url);
+
+      // Should crawl these URLs exactly once
+      expect(crawledUrls).toContain('https://test.com/docs');
+      expect(crawledUrls).toContain('https://test.com/docs/guide');
+      expect(crawledUrls).toContain('https://test.com/docs/api#/v2/endpoints');
+
+      // Should not have duplicate entries for the same page with simple anchors
+      expect(crawledUrls).not.toContain('https://test.com/docs/guide#overview');
+
+      // Pure anchor should not be crawled
+      expect(crawledUrls).not.toContain('https://test.com/docs#section1');
+
+      // Count occurrences to verify no duplicates
+      const urlCounts = crawledUrls.reduce((acc, url) => {
+        acc[url] = (acc[url] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      // Each URL should appear exactly once
+      Object.values(urlCounts).forEach((count) => {
+        expect(count).toBe(1);
+      });
+    });
+
+    it('should ignore all anchors when includeAnchors is false', async () => {
+      // Setup mock response with various anchor types
+      mockServer.addResponse('https://test.com/docs', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: `
+          <html>
+            <head><title>Documentation</title></head>
+            <body>
+              <main>
+                <h1>Documentation</h1>
+                <nav>
+                  <a href="#section1">Section 1</a>
+                  <a href="/docs/guide#overview">Guide</a>
+                  <a href="/docs/api#/v2/endpoints">API</a>
+                </nav>
+              </main>
+            </body>
+          </html>
+        `,
+      });
+
+      mockServer.addResponse('https://test.com/docs/guide', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: '<html><body><main><h1>Guide</h1><p>Content</p></main></body></html>',
+      });
+
+      mockServer.addResponse('https://test.com/docs/api', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+        body: '<html><body><main><h1>API</h1><p>Content</p></main></body></html>',
+      });
+
+      // Test with includeAnchors disabled
+      const crawler = new DocumentationCrawler('https://test.com/docs', {
+        maxDepth: 2,
+        includeAnchors: false,
+      });
+
+      const results = await crawler.crawl();
+
+      // Get all crawled URLs
+      const crawledUrls = results.map((r) => r.url);
+
+      // Should crawl base URLs without anchors
+      expect(crawledUrls).toContain('https://test.com/docs');
+      expect(crawledUrls).toContain('https://test.com/docs/guide');
+      expect(crawledUrls).toContain('https://test.com/docs/api');
+
+      // Should not have any URLs with anchors or fragments
+      crawledUrls.forEach((url) => {
+        expect(url).not.toContain('#');
+      });
+    });
+  });
 });
