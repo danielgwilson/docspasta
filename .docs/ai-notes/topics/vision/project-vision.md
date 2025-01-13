@@ -55,4 +55,4 @@ To make documentation searchable, accessible, and maintainable by providing a mo
 3. **Community Metrics**
    - GitHub stars
    - Contributors
-   - Community engagement 
+   - Community engagement

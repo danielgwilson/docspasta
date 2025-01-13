@@ -1,4 +1,4 @@
-# 🍝 DocsPasta
+**# 🍝 DocsPasta
 
 A modern documentation crawler and processor that makes documentation searchable and accessible. DocsPasta intelligently crawls, processes, and organizes documentation from various sources, making it easier to find and use the information you need.
 
@@ -187,4 +187,4 @@ npm run test:ui
 
 ## 📄 License
 
-MIT License - see [LICENSE](./LICENSE) for details 
+MIT License - see [LICENSE](./LICENSE) for details **
