@@ -1,171 +1,153 @@
-# 📚 Docspasta - Proposed Architecture
+# 🍝 DocsPasta Re-architecture Plan
 
-## 1. Context
-
-Docspasta aims to crawl and harvest relevant documentation pages for integration into LLM contexts. In addition, it must handle:
-
-- **Domain or Subpath Scoping** to stay within the relevant portion of a site
-- **Depth Control** to avoid going too deep (and to limit extraneous data)
-- **De-duplication** to handle duplicate content
-- **Pre-Processing** to strip away non-essential elements (headers, footers, nav bars, etc.)
-- **Caching** to avoid re-fetching identical content
-- **Statistics Gathering** like token counting, number of pages visited, time spent, etc.
-
-## 2. Current Version (Simplified Overview)
-
-| **DocumentationCrawler** | **Description**              |
-| ------------------------ | ---------------------------- |
-| `fetchWithRetry()`       | Fetches HTML with retries    |
-| `extractLinks()`         | Finds links in `<a href="">` |
-| `extractContent()`       | Picks `<main>` or `<body>`   |
-| `turndownService`        | Converts HTML to Markdown    |
-| Concurrency              | Via `p-queue`                |
-| Caching layer            | Implements caching mechanism |
-
-### Shortcomings
-
-- We do not robustly handle **path constraints** (e.g. user only wants to crawl `/docs/` subpath).
-- We do not handle **domain or subdomain** scoping in a deeply flexible way (some docs might live at `docs.example.com` or `example.com/docs`).
-- De-dup is simplistic (hash-based). We might want a more robust approach eventually, but for now hashing is okay.
-- We lack a built-in **token counting** approach.
-- Logging & stats are scattered. We want a more uniform approach.
-
-## 3. Proposed Re-Architecture
-
-### High-Level Idea
-
-1. **Crawler**: A central class that orchestrates the entire crawl.  
-2. **Link Strategy**: Customizable logic for determining if a link stays in scope:
-   - By domain or subdomain
-   - By path prefix or route
-   - By extension filtering (like `.pdf`, `.png` -> skip)
-3. **Content Pipeline**
-   - HTML fetch -> parse -> remove undesired elements -> code block formatting -> markdown -> optional token counting
-4. **Caching**
-   - Use a versioned in-memory (or file-based) cache for entire crawl results + individual pages 
-5. **Logging & Stats**
-   - Each step logs to console or file
-   - After each page is processed, store partial stats
-   - Provide final summary stats (pages visited, total tokens, etc.)
-
-### Example Flow
-
-### Shortcomings
-
-- We do not robustly handle **path constraints** (e.g. user only wants to crawl `/docs/` subpath).
-- We do not handle **domain or subdomain** scoping in a deeply flexible way (some docs might live at `docs.example.com` or `example.com/docs`).
-- De-dup is simplistic (hash-based). We might want a more robust approach eventually, but for now hashing is okay.
-- We lack a built-in **token counting** approach.
-- Logging & stats are scattered. We want a more uniform approach.
-
-## 3. Proposed Re-Architecture
-
-### High-Level Idea
-
-1. **Crawler**: A central class that orchestrates the entire crawl.  
-2. **Link Strategy**: Customizable logic for determining if a link stays in scope:
-   - By domain or subdomain
-   - By path prefix or route
-   - By extension filtering (like `.pdf`, `.png` -> skip)
-3. **Content Pipeline**: 
-   - HTML fetch -> parse -> remove undesired elements -> code block formatting -> markdown -> optional token counting
-4. **Caching**:
-   - Use a versioned in-memory (or file-based) cache for entire crawl results + individual pages 
-5. **Logging & Stats**:
-   - Each step logs to console or file
-   - After each page is processed, store partial stats
-   - Provide final summary stats (pages visited, total tokens, etc.)
-
-### Example Flow
-
-```mermaid
-flowchart LR
-    subgraph Crawler Lifecycle
-        A["Init Crawler"] --> B["Queue Start URL"]
-        B --> C["processUrl(node)"]
-        C --> D["fetchWithRetry()"]
-        D --> E["extractContent()"]
-        E --> F["Turndown → Markdown"]
-        F --> G["Duplicate Check → Hash"]
-        G --> H["Extract Links"]
-        H --> I["Queue Child Links"]
-        I --> J["Update Stats & On-Progress"]
-        J --> K["End? → Return Results"]
-        K --> A
-    end
-```
-
-### Detailed Domain / Path Scope
-
-We can define an option like:
-
-```ts
-interface CrawlScope {
-  domain?: string;      // e.g. "docs.example.com"
-  subpath?: string;     // e.g. "/docs"
-  allowSubdomains?: boolean;
-}
-
-```
-
-Then we filter each discovered link by comparing it to the scope rules.
-
-### Token Counting (Optional)
-
-Include a lightweight function:
-
-```ts
-function approximateTokenCount(text: string): number {
-  // A naive approach: assume ~4 chars/token
-  return Math.ceil(text.split(/\s+/).join('').length / 4);
-}
-
-```
-
-Or integrate an existing open-source library. This step is optional but beneficial for advanced stats.
-
-## 4. Key Components
-
-1. **DocumentationCrawler**: Orchestrates everything.
-2. **CrawlerOptions** & **CrawlScope**: Fine-grained user controls.
-3. **Cache**: In-memory version or extensible backend.
-4. **Logger**: Consistent logging for dev/debug.
-5. **Stats**: Aggregates pages visited, time spent, total tokens, etc.
-
-## 5. Architecture Diagram
-
-```mermaid
-flowchart TB
-    %% Custom styling for each node type
-    classDef input fill:#E0F2FE,stroke:#3B82F6,stroke-width:2px,color:#000
-    classDef process fill:#FEF3C7,stroke:#F59E0B,stroke-width:2px,color:#000
-    classDef storage fill:#FDE68A,stroke:#F59E0B,stroke-width:2px,color:#000
-    classDef stats fill:#C7D2FE,stroke:#6366F1,stroke-width:2px,color:#000
-    %% Set a default link style
-    linkStyle default stroke:#666,stroke-width:1.5px
-    subgraph "Docspasta" 
-        A["Client Input"]:::input --> B["DocumentationCrawler"]:::process
-        B --> C["Queue + Rate Limit"]:::process
-        C --> D["fetchWithRetry (p-queue)"]:::process
-        D --> E["JS DOM Parse + Turndown"]:::process
-        E --> F["Content & Code Blocks\n→ Markdown"]:::process
-        F --> G["Dedup / Hash Check"]:::process
-        G --> H["Cache Storage"]:::storage
-
-        %% Parallel link to stats
-        B --> I["Stats Gathering"]:::stats
-        I --> J["Progress + SSE Updates"]:::stats
-    end
-```
-
-**This approach** ensures we respect domain/path constraints, avoid repeated pages, gather robust stats, and produce final content suitable for LLM use.
+DocsPasta is intended to be a modern, general-purpose documentation crawler.  
+It indexes large sets of docs pages for use in AI (LLM) contexts, enabling more robust and up-to-date knowledge ingestion.
 
 ---
 
-## 6. New Version Plan (Summary)
+## 1. Context
 
-1. **Add** `crawlScope` or `domainFilter` + `subpathFilter` to `CrawlerOptions`.
-2. **Filter** links in `extractLinks` so that only domain + subpath + file extension pass.
-3. **Optionally** add a `tokenCount` to each `PageResult`.
-4. **Consolidate** logging with a new logger utility or keep the pattern but add more structured logs.
-5. **Finish** the final stats by including total tokens, total pages, total time, etc.
+- **Use Case**: Provide an easy way to crawl documentation for any library or framework, format it into Markdown or other AI-friendly outputs, and serve it or feed it to LLMs with minimal manual overhead.
+- **Pain Points**:
+  - Copy/pasting entire docs by hand is frustrating.
+  - LLM knowledge cutoff means new or obscure projects are unknown to them.
+  - Some documentation is large and has deeply-nested or multi-part structures that are painful to navigate manually.
+- **Goal**:
+  - A robust crawler that can parse, deduplicate, and store documentation in a manageable format.
+  - Provide the resulting content in a variety of formats (Markdown, plain text, etc.).
+  - Offer stats on tokens, enabling chunking or gating logic before sending to an LLM.
+
+---
+
+## 2. Current Version Overview
+
+The existing system:
+1. **Entry Point**: Provide a `startUrl`.
+2. **Depth-based BFS**: Recursively follow links up to `maxDepth`.
+3. **Content Extraction**: Strips away `nav`, `header`, `footer` if configured, transforms HTML → Markdown.
+4. **Caching**: Simple in-memory for repeated runs.
+5. **Deduplication**: Basic text-based hashing to detect identical content.
+6. **Rate Limiting & Concurrency**: p-queue used to manage request concurrency.
+
+**Shortcomings**:
+- Inflexible logic for deciding which links to follow (only checks domain or not).
+- If user starts deep (e.g. `docs.example.com/foo`), it might miss the rest of the docs (like `docs.example.com/bar`).
+- No concept of a “prefix” or “root path” for the docs.  
+- Does not compute or store approximate token usage for each page.  
+- Logging is basic (helpful, but can be expanded).  
+- Some repeated or “boring” pages might get crawled anyway.
+
+---
+
+## 3. Proposed Re-architecture
+
+### 3.1 Overview
+
+Instead of purely a depth-based BFS, we introduce:
+- **Initial Base Discovery**: Identify the root or “prefix” from `startUrl`. E.g., if `startUrl` is `docs.example.com/path/subpath`, we attempt to discover or define a broader “base prefix” (like `docs.example.com/path`) so we can also climb “up” or “over” if we detect it. (This can be set with a user override or discovered automatically.)
+- **Domain Restriction**: We continue to limit to the same domain unless explicitly allowed to go to external docs.
+- **Refined BFS/DFS Hybrid**: 
+  1. We track each discovered link.  
+  2. If it’s in-domain and not yet visited, we check if it matches the user-defined prefix rules.  
+  3. We also unify the notion of “maxDepth” with a “maxDistance” from the discovered base path, which can be a BFS technique.
+- **Token Counting**: Each page gets an approximate token count. Summing the total tokens helps us decide how big the final doc set is. Possibly we chunk large docs automatically in future expansions.
+- **Better Logging**: Provide structured logs for each step (fetch, parse, deduplicate, store, skip).
+- **Revised Deduping**: Optionally store partial “similarity” metrics. For now, we still do a simple hash-based approach, but with improved logging and an easier path to expand to partial or fuzzy dedup.
+
+### 3.2 Architecture Components
+
+1. **CrawlerController**: The main entry for a crawl run.  
+2. **CrawlerQueue** (via p-queue): Manages concurrency, rate limiting, scheduling.  
+3. **Base URL Discovery**: A function that, given a `startUrl`, tries to figure out a “root path” for that doc site. 
+4. **Link Decision**: A robust function that checks domain, prefix, file extensions, etc.  
+5. **PageProcessor**: Summarizes content extraction, code block formatting, dedup checks, token counting.  
+6. **Cache**: In-memory or persistent store for pages.  
+7. **Stats/Logs**: Store BFS progress, token usage, etc.
+
+### 3.3 High-level Diagram
+
+```mermaid
+flowchart TB
+
+    %% Define some simple style classes:
+    classDef step fill:#FEF3C7,stroke:#F59E0B,stroke-width:2px,color:#000
+    classDef data fill:#E0F2FE,stroke:#3B82F6,stroke-width:2px,color:#000
+    linkStyle default stroke:#666,stroke-width:1.5px
+
+    %% Nodes
+    StartUrl(("Start URL")):::step --> BaseDiscovery["Base Discovery"]:::step
+    BaseDiscovery --> BFS["Queue BFS/DFS"]:::step
+    BFS -->|Fetch & Parse| PageProcessor["Page Processor"]:::step
+    PageProcessor --> DedupCheck["Deduplicate Check"]:::step
+    PageProcessor --> TokenCounter["Token Counting"]:::step
+    DedupCheck --> BFS
+    BFS --> Cache["In-memory Cache"]:::data
+    BFS --> Results["Final Structured Docs"]:::data
+    Results --> Logs["Logs & Stats"]:::data
+```
+
+### 3.4 Detailed Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant CrawlerController
+    participant Cache
+    participant LinkDecision
+    participant TokenCounter
+    participant BFSQueue
+    participant PageProcessor
+    participant Output
+
+    User->>CrawlerController: startCrawl(url, settings)
+    CrawlerController->>Cache: Check if we have a recent entry
+
+    alt Cache Hit
+        Cache-->>CrawlerController: Return cached results
+        CrawlerController-->>User: Return cached results
+    else Cache Miss
+        CrawlerController->>LinkDecision: discoverBase(url)
+        LinkDecision-->>CrawlerController: baseUrl / prefix
+        CrawlerController->>BFSQueue: queue initial node
+
+        loop While BFSQueue Not Empty
+            BFSQueue->>PageProcessor: fetchAndProcess(url)
+            PageProcessor->>TokenCounter: approximateTokenCount(markdown)
+            PageProcessor->>Cache: store page result
+            PageProcessor->>LinkDecision: get next links
+            LinkDecision->>BFSQueue: add valid links
+        end
+
+        CrawlerController-->>Output: final results
+        Output-->>User: final docs, logs, stats
+    end
+```
+
+## 4. Key Components
+
+1. **`CrawlerController`**
+    - Orchestrates the entire crawl.
+    - Exposes a single `crawl()` method.
+2. **`LinkDecision`**
+    - Logic for determining if a link is in scope (same domain, matches prefix, not skipping certain patterns).
+3. **`PageProcessor`**
+    - Fetch page → parse HTML → remove nav, header, footers → convert to Markdown → approximate tokens.
+4. **`TokenCounter`**
+    - Simple method to estimate tokens from a string. In future, integrate GPT tokenizer or similar.
+5. **`Cache`**
+    - In-memory (for now) with versioning, time-based expiration.
+6. **`Stats/Logging`**
+    - Every step logs info.
+    - Summarize final stats (#pages, total tokens, new links found, etc.).
+
+---
+
+## 5. Conclusion
+
+This re-architecture ensures:
+
+- We can climb from a deep link up to the “root” doc path.
+- We track tokens for each page.
+- We have robust BFS, concurrency, logging, stats.
+- The system is flexible enough to handle most doc site structures.

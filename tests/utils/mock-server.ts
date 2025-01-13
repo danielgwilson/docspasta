@@ -15,17 +15,13 @@ interface MockResponse {
 }
 
 /**
- * Sets up a mock server for testing crawler behavior,
- * allowing you to define pages and error responses.
- * @param initialPages - The initial pages to mock.
- * @returns An object with helper methods to manipulate the mock server.
+ * Sets up a mock server using MSW for simulating HTTP responses.
  */
 export function setupMockServer(initialPages: MockPage[]) {
   const requestCounts = new Map<string, number>();
   const responses = new Map<string, MockResponse>();
   const errorResponses = new Map<string, { status: number; message: string }>();
 
-  // Set up initial pages
   initialPages.forEach((page) => {
     responses.set(page.url, {
       status: 200,
@@ -52,7 +48,6 @@ export function setupMockServer(initialPages: MockPage[]) {
     });
   });
 
-  // Create request handler
   const handler = http.get('https://test.com*', async ({ request }) => {
     try {
       const url = new URL(request.url).href;
@@ -65,7 +60,7 @@ export function setupMockServer(initialPages: MockPage[]) {
       const count = (requestCounts.get(url) || 0) + 1;
       requestCounts.set(url, count);
 
-      // Check for error responses
+      // Check error
       const errorResponse =
         errorResponses.get(url) ||
         errorResponses.get(urlWithoutSlash) ||
@@ -78,7 +73,7 @@ export function setupMockServer(initialPages: MockPage[]) {
         });
       }
 
-      // Get normal response
+      // Normal
       const response =
         responses.get(url) ||
         responses.get(urlWithoutSlash) ||
@@ -109,22 +104,16 @@ export function setupMockServer(initialPages: MockPage[]) {
     }
   });
 
-  // Use the handler
   server.use(handler);
 
   return {
     server,
-    /**
-     * Resets the mock server state (response maps, request counts)
-     * back to the initial state.
-     */
     reset: () => {
       console.log('Resetting mock server...');
       requestCounts.clear();
       errorResponses.clear();
       responses.clear();
 
-      // Re-add initial pages
       initialPages.forEach((page) => {
         console.log('Adding initial page:', page.url);
         responses.set(page.url, {
@@ -152,15 +141,9 @@ export function setupMockServer(initialPages: MockPage[]) {
         });
       });
 
-      // Reset MSW handlers
       server.resetHandlers(handler);
       console.log('Mock server reset complete');
     },
-    /**
-     * Adds a new normal response for the specified URL to the mock server.
-     * @param url - The URL to respond to.
-     * @param response - The mock response details.
-     */
     addResponse: (url: string, response: MockResponse) => {
       responses.set(url, {
         ...response,
@@ -170,20 +153,9 @@ export function setupMockServer(initialPages: MockPage[]) {
         },
       });
     },
-    /**
-     * Adds an error response that will be returned for the specified URL.
-     * @param url - The URL to respond to with an error.
-     * @param status - The HTTP status code.
-     * @param message - The error message body.
-     */
     addErrorResponse: (url: string, status: number, message: string) => {
       errorResponses.set(url, { status, message });
     },
-    /**
-     * Retrieves how many times the specified URL was requested.
-     * @param url - The URL to check.
-     * @returns The count of how many times the URL was requested.
-     */
     getRequestCount: (url: string) => requestCounts.get(url) || 0,
   };
 }

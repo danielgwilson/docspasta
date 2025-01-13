@@ -5,7 +5,7 @@ import type { PageResult, CrawlerOptions } from '../shared/types';
 describe('CrawlerCache', () => {
   beforeEach(async () => {
     await crawlerCache.clear();
-    crawlerCache.setMaxAge(50); // 50ms expiry for testing
+    crawlerCache.setMaxAge(50); // short expiry
   });
 
   it('should store and retrieve page results', async () => {
@@ -32,12 +32,9 @@ describe('CrawlerCache', () => {
 
   it('should handle invalid cache entries', async () => {
     const testUrl = 'https://test.com/invalid';
-
-    // Store invalid data
-    // @ts-expect-error - Testing scenario
+    // @ts-expect-error testing scenario
     await crawlerCache.set(testUrl, null);
     const cached = await crawlerCache.get(testUrl);
-
     expect(cached).toBeNull();
   });
 
@@ -52,6 +49,7 @@ describe('CrawlerCache', () => {
       timeout: 30000,
       rateLimit: 1000,
       includeAnchors: false,
+      discoverBasePath: true,
       maxRetries: 3,
     };
     const results: PageResult[] = [
@@ -106,11 +104,8 @@ describe('CrawlerCache', () => {
 
     await crawlerCache.set(testUrl, oldResult);
 
-    // Wait for cache to expire
     await new Promise((resolve) => setTimeout(resolve, 100));
     const cached = await crawlerCache.get(testUrl);
-
-    // Should not return expired cache entries
     expect(cached).toBeNull();
   });
 
@@ -136,10 +131,7 @@ describe('CrawlerCache', () => {
       });
 
     const results = await Promise.all(operations);
-
-    // All operations should complete without errors
     expect(results.every((r) => r !== null)).toBe(true);
-    // Should have consistent data
     expect(new Set(results.map((r) => r?.title)).size).toBe(1);
   });
 });

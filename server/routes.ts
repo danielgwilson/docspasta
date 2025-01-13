@@ -2,13 +2,6 @@ import express, { type Express } from 'express';
 import { createServer, type Server } from 'http';
 import { DocumentationCrawler } from './lib/crawler';
 
-/**
- * Registers all routes (including API endpoints) to the provided Express app
- * and returns the created HTTP server.
- *
- * @param app - The Express application to attach routes to.
- * @returns An HTTP Server instance.
- */
 export function registerRoutes(app: Express): Server {
   const router = express.Router();
 
@@ -22,7 +15,7 @@ export function registerRoutes(app: Express): Server {
     try {
       console.log('Starting crawl with settings:', settings);
       const crawler = new DocumentationCrawler(url, settings, (result) => {
-        // If client requests SSE, push progress updates
+        // If SSE
         if (req.headers.accept?.includes('text/event-stream')) {
           res.write(
             `data: ${JSON.stringify({ type: 'progress', result })}\n\n`
@@ -30,7 +23,7 @@ export function registerRoutes(app: Express): Server {
         }
       });
 
-      // Handle SSE
+      // SSE
       if (req.headers.accept?.includes('text/event-stream')) {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -41,7 +34,7 @@ export function registerRoutes(app: Express): Server {
 
       const results = await crawler.crawl();
 
-      // Send final results
+      // Send final
       if (req.headers.accept?.includes('text/event-stream')) {
         res.write(`data: ${JSON.stringify({ type: 'complete', results })}\n\n`);
         res.end();

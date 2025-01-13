@@ -2,8 +2,8 @@
  * A utility class to help find relevant anchor IDs within DOM elements.
  *
  * @remarks
- * This is particularly useful for mapping headings or elements in
- * documentation to anchor-based navigation links.
+ * Particularly useful for mapping headings or elements in documentation
+ * to anchor-based navigation links.
  */
 export class Anchor {
   /**

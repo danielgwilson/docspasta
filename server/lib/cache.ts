@@ -24,8 +24,8 @@ class CrawlerCache {
     string,
     { results: PageResult[]; timestamp: number; version: number }
   >;
-  private readonly CURRENT_VERSION = 1;
-  private _maxAge = 24 * 60 * 60 * 1000; // 24 hours by default
+  private readonly CURRENT_VERSION = 2; // Bumped version for new architecture
+  private _maxAge = 24 * 60 * 60 * 1000; // 24h default
 
   constructor() {
     this.cache = new Map();
@@ -34,23 +34,23 @@ class CrawlerCache {
   }
 
   /**
-   * For testing purposes: set a custom max age for the cache.
+   * For testing or custom usage: set a custom max age for the cache.
    */
   setMaxAge(maxAge: number): void {
     this._maxAge = maxAge;
   }
 
   /**
-   * Normalizes a URL key for usage in the page result cache.
+   * Get the current max age setting for the cache.
    */
+  getMaxAge(): number {
+    return this._maxAge;
+  }
+
   private generateCacheKey(url: string): string {
     return url.toLowerCase().trim();
   }
 
-  /**
-   * Generates a unique cache key for storing complete crawl results
-   * based on the startUrl plus a stringified version of the crawler settings.
-   */
   private generateCrawlCacheKey(
     startUrl: string,
     settings: Required<CrawlerOptions>
@@ -58,38 +58,25 @@ class CrawlerCache {
     return `${startUrl.toLowerCase().trim()}:${JSON.stringify(settings)}`;
   }
 
-  /**
-   * Checks if a given timestamp is older than the allowed max age.
-   */
   private isExpired(timestamp: number): boolean {
     return Date.now() - timestamp > this._maxAge;
   }
 
-  /**
-   * Checks if the cache version matches the current known version.
-   */
   private isValidVersion(version: number): boolean {
     return version === this.CURRENT_VERSION;
   }
 
-  /**
-   * Retrieves a single page result from cache if available and valid.
-   */
   async get(url: string): Promise<PageResult | null> {
     try {
       const key = this.generateCacheKey(url);
       const cached = this.cache.get(key);
-
-      if (!cached) {
-        return null;
-      }
+      if (!cached) return null;
 
       if (!this.isValidVersion(cached.version)) {
         log.debug('Cache version mismatch for URL:', url);
         this.cache.delete(key);
         return null;
       }
-
       if (this.isExpired(cached.timestamp)) {
         log.debug('Cache entry expired for URL:', url);
         this.cache.delete(key);
@@ -103,9 +90,6 @@ class CrawlerCache {
     }
   }
 
-  /**
-   * Stores a single page result in cache.
-   */
   async set(url: string, result: PageResult): Promise<void> {
     try {
       const key = this.generateCacheKey(url);
@@ -119,9 +103,6 @@ class CrawlerCache {
     }
   }
 
-  /**
-   * Retrieves the entire results of a crawl session based on a specific startUrl + settings.
-   */
   async getCrawlResults(
     startUrl: string,
     settings: Required<CrawlerOptions>
@@ -129,17 +110,13 @@ class CrawlerCache {
     try {
       const key = this.generateCrawlCacheKey(startUrl, settings);
       const cached = this.crawlCache.get(key);
-
-      if (!cached) {
-        return null;
-      }
+      if (!cached) return null;
 
       if (!this.isValidVersion(cached.version)) {
         log.debug('Crawl cache version mismatch for URL:', startUrl);
         this.crawlCache.delete(key);
         return null;
       }
-
       if (this.isExpired(cached.timestamp)) {
         log.debug('Crawl cache expired for URL:', startUrl);
         this.crawlCache.delete(key);
@@ -153,9 +130,6 @@ class CrawlerCache {
     }
   }
 
-  /**
-   * Stores the results of an entire crawl session for a given startUrl + settings.
-   */
   async setCrawlResults(
     startUrl: string,
     settings: Required<CrawlerOptions>,
@@ -173,9 +147,6 @@ class CrawlerCache {
     }
   }
 
-  /**
-   * Clears all cached items (both single page results and entire crawl results).
-   */
   clear(): void {
     this.cache.clear();
     this.crawlCache.clear();

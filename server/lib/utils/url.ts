@@ -21,18 +21,13 @@ export function normalizeUrl(
     // Remove trailing slash
     let normalized = url.href.replace(/\/$/, '');
 
-    // Remove fragments unless it's an anchor-only link (e.g., #section)
+    // Remove fragments unless it's anchor-only
     if (!href.startsWith('#')) {
       normalized = normalized.split('#')[0];
     }
 
-    // Handle external links
+    // Handle external links if followExternalLinks is false
     if (!followExternalLinks && url.origin !== baseUrlObj.origin) {
-      return null;
-    }
-
-    // Skip URLs that are clearly not documentation
-    if (url.pathname === '/' || url.pathname === '') {
       return null;
     }
 
@@ -69,8 +64,8 @@ export function generateFingerprint(
 }
 
 /**
- * Checks if a URL is likely to be a documentation page
- * by excluding common asset paths and file extensions.
+ * Checks if a URL is likely to be a documentation page by excluding
+ * common asset paths and file extensions.
  *
  * @param url - The URL to check for doc-likeness.
  * @returns A boolean indicating if it looks like documentation content.
@@ -79,7 +74,10 @@ export function isValidDocumentationUrl(url: string): boolean {
   try {
     const urlObj = new URL(url);
 
-    // Skip common non-documentation paths
+    // If it's just the domain root (like "https://example.com/"),
+    // we do NOT automatically exclude it. Let the caller decide.
+    // So we remove the prior "if (urlObj.pathname === '/' ...) return false;"
+
     const skipPaths = [
       '/assets/',
       '/images/',
@@ -90,14 +88,12 @@ export function isValidDocumentationUrl(url: string): boolean {
       '/static/',
       '/media/',
     ];
-
     if (
       skipPaths.some((path) => urlObj.pathname.toLowerCase().includes(path))
     ) {
       return false;
     }
 
-    // Skip common file extensions
     const skipExtensions = [
       '.jpg',
       '.jpeg',
@@ -116,16 +112,13 @@ export function isValidDocumentationUrl(url: string): boolean {
       '.woff',
       '.woff2',
       '.eot',
+      '.pdf',
+      '.zip',
+      '.tar',
     ];
-
     if (
       skipExtensions.some((ext) => urlObj.pathname.toLowerCase().endsWith(ext))
     ) {
-      return false;
-    }
-
-    // Skip default index pages
-    if (urlObj.pathname === '/' || urlObj.pathname === '') {
       return false;
     }
 
@@ -133,4 +126,76 @@ export function isValidDocumentationUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Attempt to discover a "root path" from a given URL by climbing up
+ * until a shorter path is found that still appears to be in the same domain.
+ *
+ * For example, if the startUrl is https://docs.example.com/foo/bar,
+ * we try:
+ *   - https://docs.example.com/foo
+ *   - https://docs.example.com/
+ * Then we store whichever is used. In a real scenario we might do
+ * HEAD requests or additional checks to see if it's a doc landing page.
+ *
+ * @param startUrl - The user-supplied starting point.
+ * @returns The discovered root path (e.g. "https://docs.example.com/foo"), never with a trailing slash.
+ */
+export function discoverRootPath(startUrl: string): string {
+  try {
+    const urlObj = new URL(startUrl);
+    let path = urlObj.pathname;
+    const origin = urlObj.origin;
+
+    // If path is root or empty, just return origin
+    if (!path || path === '/') {
+      return origin;
+    }
+
+    // In this naive approach, we remove segments one by one
+    // and then break if that path is too short or is just "/"
+    const segments = path.split('/').filter(Boolean); // remove empty
+    if (segments.length <= 1) {
+      // e.g. "/foo" → origin
+      return `${origin}/${segments[0] || ''}`.replace(/\/$/, '');
+    }
+
+    // Remove the last segment to climb up
+    segments.pop();
+    const climbedPath = segments.join('/');
+    if (!climbedPath) {
+      // means we popped the only segment
+      return origin;
+    }
+
+    // Return the resulting path, with no trailing slash
+    return `${origin}/${climbedPath.replace(/\/$/, '')}`;
+  } catch {
+    // fallback
+    return startUrl.replace(/\/$/, '');
+  }
+}
+
+/**
+ * Checks if a candidate path is within (or exactly equal to) the discovered base path.
+ * E.g., base=/docs, candidate=/docs/foo, return true. candidate=/about, return false.
+ *
+ * @param basePath - The discovered base path, e.g. "/docs"
+ * @param candidatePath - The path from a candidate URL, e.g. "/docs/foo/bar"
+ */
+export function isPathWithinBase(
+  basePath: string,
+  candidatePath: string
+): boolean {
+  if (!basePath || basePath === '/') {
+    return true; // treat everything in same domain as in-scope if base is root
+  }
+  // Ensure both start with '/'
+  const base = basePath.startsWith('/') ? basePath : `/${basePath}`;
+  const candidate = candidatePath.startsWith('/')
+    ? candidatePath
+    : `/${candidatePath}`;
+
+  return candidate.startsWith(base);
 }

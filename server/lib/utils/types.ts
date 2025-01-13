@@ -1,8 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Zod schema describing crawler options, with defaults
- * for convenience.
+ * Zod schema describing crawler options, with defaults.
  */
 export const crawlerOptionsSchema = z.object({
   maxDepth: z.number().int().positive().default(3),
@@ -13,11 +12,20 @@ export const crawlerOptionsSchema = z.object({
   rateLimit: z.number().int().positive().default(1000),
   maxConcurrentRequests: z.number().int().positive().default(5),
   includeAnchors: z.boolean().default(false),
+  /** Newly added for re-architecture. */
+  discoverBasePath: z.boolean().default(true),
+  /** Previously not in the schema, now added to fix 'maxRetries' references. */
+  maxRetries: z.number().int().positive().default(3),
 });
 
-/** The raw (unvalidated) shape of crawler options. */
+/**
+ * The raw (unvalidated) shape of crawler options that can be passed in.
+ */
 export type CrawlerOptions = z.input<typeof crawlerOptionsSchema>;
-/** The validated and parsed shape of crawler options. */
+
+/**
+ * The validated shape of crawler options after parsing with Zod.
+ */
 export type ValidatedCrawlerOptions = z.output<typeof crawlerOptionsSchema>;
 
 /**
@@ -56,8 +64,10 @@ export interface PageResult {
   newLinksFound?: number;
   /** If the crawl encountered an error on this page, it's stored here. */
   error?: string;
-  /** Unix timestamp (ms) for when this page finished crawling. */
+  /** Unix timestamp (ms) when this page finished crawling. */
   timestamp: number;
-  /** List of child links found on this page. (Optional extension used in crawler) */
+  /** List of child links found on this page (optional extension used in crawler). */
   links?: string[];
+  /** Approx token count for the processed content. */
+  tokenCount?: number;
 }

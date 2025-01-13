@@ -10,9 +10,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-/**
- * Simple request logging + response capturing middleware.
- */
+// Simple request logging + response capturing
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -43,11 +41,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// IIFE to start the server
 (async () => {
   const server = registerRoutes(app);
 
-  // Global error handler
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const status = (err as any).status || (err as any).statusCode || 500;
     const message = (err as any).message || 'Internal Server Error';
@@ -56,14 +52,13 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // Only setup Vite in development
+  // Setup Vite in dev, or serve static in production
   if (app.get('env') === 'development') {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  // Start the server
   const PORT = Number(process.env.PORT) || 3000;
   server.listen(PORT, '0.0.0.0', () => {
     log(`serving on port ${PORT}`);

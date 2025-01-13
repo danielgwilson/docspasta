@@ -43,7 +43,7 @@ export class CodeBlockHandler {
   };
 
   /**
-   * Attempts to determine the language of a given <code> block by
+   * Determines the language of a given <code> block by
    * inspecting class attributes, data attributes, or content heuristics.
    */
   private static getLanguage(element: Element): string {
@@ -69,12 +69,12 @@ export class CodeBlockHandler {
       return this.languageMap[normalized] || dataLang.toLowerCase();
     }
 
-    // Try to detect from content heuristics
+    // Simple heuristics
     const content = element.textContent || '';
     if (
       content.includes('function') ||
-      content.includes('var') ||
-      content.includes('const')
+      content.includes('var ') ||
+      content.includes('const ')
     ) {
       return 'javascript';
     }
@@ -95,7 +95,6 @@ export class CodeBlockHandler {
       return 'css';
     }
 
-    // Default: no identifiable language
     return '';
   }
 
@@ -121,7 +120,7 @@ export class CodeBlockHandler {
 
     // Remove the common indentation
     const formattedLines = lines.map((line) => {
-      if (line.trim().length === 0) return '';
+      if (!line.trim()) return '';
       return line.slice(minIndent);
     });
 
@@ -133,8 +132,6 @@ export class CodeBlockHandler {
    * Finds all code blocks inside a given DOM element and formats them
    * for more consistent code representation. Injects language-specific classes
    * and data attributes to help external formatters or highlighters.
-   *
-   * @param element - The root element containing code blocks to process.
    */
   public static processCodeBlocks(element: Element): void {
     const codeBlocks = element.querySelectorAll(
