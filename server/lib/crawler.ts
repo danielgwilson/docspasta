@@ -486,32 +486,145 @@ export class DocumentationCrawler {
   }
 
   /**
-   * Extracts main content from recognized elements, or <body> fallback,
-   * optionally removing nav/header/footer if excludeNavigation is set.
+   * Extracts and cleans main content from documentation pages.
    */
   private extractContent(doc: Document): string {
-    const mainContent = doc.querySelector(
-      'main, article, .content, #content, .main, #main'
-    );
-    if (mainContent) {
-      if (this.options.excludeNavigation) {
-        ['nav', 'header', 'footer'].forEach((selector) => {
-          mainContent.querySelectorAll(selector).forEach((el) => el.remove());
-        });
-      }
-      return mainContent.innerHTML;
+    // First try documentation-specific selectors
+    const docSelectors = [
+      'article[role="main"]',
+      'main[role="main"]',
+      '.documentation-content',
+      '.docs-content',
+      '.markdown-body',
+      '.content-body',
+      '[data-content="main"]',
+      // Fallbacks
+      'main',
+      'article',
+      '.content',
+      '#content',
+    ];
+
+    let mainContent: Element | null = null;
+    for (const selector of docSelectors) {
+      mainContent = doc.querySelector(selector);
+      if (mainContent) break;
     }
-    // fallback
-    const body = doc.querySelector('body');
-    if (body) {
-      if (this.options.excludeNavigation) {
-        ['nav', 'header', 'footer'].forEach((selector) => {
-          body.querySelectorAll(selector).forEach((el) => el.remove());
-        });
-      }
-      return body.innerHTML;
+
+    if (!mainContent) {
+      mainContent = doc.querySelector('body');
     }
-    return '';
+
+    if (!mainContent) return '';
+
+    // Create a clone to work with
+    const contentClone = mainContent.cloneNode(true) as Element;
+
+    // Remove non-content elements
+    const removeSelectors = [
+      // Navigation
+      'nav:not([aria-label="breadcrumb"])',
+      '[role="navigation"]',
+      '.navigation',
+      '.menu',
+      '.sidebar',
+      '.table-of-contents',
+      '.toc',
+      // Headers/footers
+      'header:not(.content-header)',
+      'footer',
+      // UI elements
+      'button',
+      '[role="button"]',
+      '.copy-button',
+      '.export-button',
+      '.social-links',
+      '.powered-by',
+      '.edit-page',
+      '.page-actions',
+      // Search
+      '.search',
+      '.search-box',
+      '.search-container',
+      '[role="search"]',
+      // Metadata
+      'style',
+      'script',
+      'noscript',
+      'meta',
+      // Comments
+      '.comments',
+      '#comments',
+      '.feedback',
+      // Redundant
+      '.on-this-page',
+      '.page-outline',
+      '.table-of-contents',
+      // Empty containers
+      '.spacer',
+      '.divider',
+    ];
+
+    removeSelectors.forEach((selector) => {
+      contentClone.querySelectorAll(selector).forEach((el) => el.remove());
+    });
+
+    // Clean up elements
+    contentClone.querySelectorAll('*').forEach((el) => {
+      // Remove empty elements except meaningful ones
+      if (
+        !el.textContent?.trim() &&
+        !el.querySelector('img') &&
+        !el.querySelector('code') &&
+        !['br', 'hr', 'img', 'input'].includes(el.tagName.toLowerCase())
+      ) {
+        el.remove();
+        return;
+      }
+
+      // Keep only essential attributes
+      const keepAttrs = ['href', 'src', 'alt', 'title', 'id'];
+      Array.from(el.attributes).forEach((attr) => {
+        if (!keepAttrs.includes(attr.name)) {
+          el.removeAttribute(attr.name);
+        }
+      });
+
+      // Clean up links
+      if (el.tagName.toLowerCase() === 'a') {
+        const href = el.getAttribute('href');
+        if (href?.startsWith('#')) {
+          // Remove empty anchor links
+          if (href === '#') {
+            el.remove();
+          }
+          // Remove anchor-only links that just wrap text
+          else if (el.textContent === el.getAttribute('href')?.slice(1)) {
+            el.replaceWith(el.textContent);
+          }
+        }
+      }
+    });
+
+    // Normalize whitespace
+    let content = contentClone.innerHTML;
+    content = content
+      // Remove excessive newlines
+      .replace(/\n{3,}/g, '\n\n')
+      // Remove whitespace between tags
+      .replace(/>\s+</g, '><')
+      // Normalize spaces
+      .replace(/\s{2,}/g, ' ')
+      // Clean up markdown-style links
+      .replace(/\[\s+/g, '[')
+      .replace(/\s+\]/g, ']')
+      // Remove empty paragraphs
+      .replace(/<p>\s*<\/p>/g, '')
+      // Remove repeated dashes in headers
+      .replace(/[-_]{3,}/g, '---')
+      .trim();
+
+    return content;
   }
 
   /**
