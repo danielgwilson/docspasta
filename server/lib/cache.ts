@@ -1,6 +1,13 @@
-import type { PageResult, CrawlerOptions } from '../../shared/types';
+/**
+ * Advanced caching system for the documentation crawler.
+ * Provides efficient storage and retrieval of page results with versioning.
+ * @module CrawlerCache 
+ */
 
-// Simple logger helper
+import type { PageResult, CrawlerOptions } from '../../shared/types';
+import crypto from 'crypto';
+
+// Simple logger helper (retained from original)
 const log = {
   debug: (...args: unknown[]) => console.debug('[Cache]', ...args),
   info: (...args: unknown[]) => console.info('[Cache]', ...args),
@@ -9,11 +16,18 @@ const log = {
 };
 
 /**
+ * Memory-efficient content fingerprinting
+ */
+const createFingerprint = (content: string): string => {
+  return crypto
+    .createHash('sha256')
+    .update(content.toLowerCase().replace(/\s+/g, ' '))
+    .digest('base64');
+};
+
+/**
  * In-memory cache for individual page results and entire crawl results.
- *
- * @remarks
- * This cache uses a simple Map-based in-memory approach with time-based
- * invalidation and a version check to ensure older entries are discarded.
+ * Uses an LRU-style cache with versioning and efficient memory management.
  */
 class CrawlerCache {
   private cache: Map<
@@ -24,8 +38,10 @@ class CrawlerCache {
     string,
     { results: PageResult[]; timestamp: number; version: number }
   >;
-  private readonly CURRENT_VERSION = 2; // Bumped version for new architecture
+  private readonly CURRENT_VERSION = 2;
   private _maxAge = 24 * 60 * 60 * 1000; // 24h default
+  private _maxSize = 1000; // Maximum number of entries
+  private contentFingerprints = new Set<string>();
 
   constructor() {
     this.cache = new Map();
@@ -34,17 +50,24 @@ class CrawlerCache {
   }
 
   /**
-   * For testing or custom usage: set a custom max age for the cache.
+   * Set custom max age for cache entries
    */
   setMaxAge(maxAge: number): void {
     this._maxAge = maxAge;
   }
 
   /**
-   * Get the current max age setting for the cache.
+   * Get current max age setting
    */
   getMaxAge(): number {
     return this._maxAge;
+  }
+
+  /**
+   * Set maximum size for the cache
+   */
+  setMaxSize(size: number): void {
+    this._maxSize = size;
   }
 
   private generateCacheKey(url: string): string {
@@ -66,6 +89,20 @@ class CrawlerCache {
     return version === this.CURRENT_VERSION;
   }
 
+  private evictOldEntries(): void {
+    // LRU-style eviction
+    if (this.cache.size > this._maxSize) {
+      const entriesToEvict = [...this.cache.entries()]
+        .sort(([, a], [, b]) => a.timestamp - b.timestamp)
+        .slice(0, Math.floor(this._maxSize * 0.2)); // Remove oldest 20%
+
+      for (const [key] of entriesToEvict) {
+        this.cache.delete(key);
+      }
+      log.debug(`Evicted ${entriesToEvict.length} old cache entries`);
+    }
+  }
+
   async get(url: string): Promise<PageResult | null> {
     try {
       const key = this.generateCacheKey(url);
@@ -83,6 +120,8 @@ class CrawlerCache {
         return null;
       }
 
+      // Update timestamp to maintain LRU order
+      cached.timestamp = Date.now();
       return cached.result;
     } catch (error) {
       log.error('Error retrieving from cache:', error);
@@ -98,9 +137,23 @@ class CrawlerCache {
         timestamp: Date.now(),
         version: this.CURRENT_VERSION,
       });
+
+      // Store content fingerprint for duplicate detection
+      if (result.content) {
+        this.contentFingerprints.add(createFingerprint(result.content));
+      }
+
+      this.evictOldEntries();
     } catch (error) {
       log.error('Error setting cache:', error);
     }
+  }
+
+  /**
+   * Check if content is duplicate based on fingerprint
+   */
+  isDuplicate(content: string): boolean {
+    return this.contentFingerprints.has(createFingerprint(content));
   }
 
   async getCrawlResults(
@@ -142,6 +195,13 @@ class CrawlerCache {
         timestamp: Date.now(),
         version: this.CURRENT_VERSION,
       });
+
+      // Store content fingerprints for all results
+      for (const result of results) {
+        if (result.content) {
+          this.contentFingerprints.add(createFingerprint(result.content));
+        }
+      }
     } catch (error) {
       log.error('Error setting crawl results cache:', error);
     }
@@ -150,7 +210,21 @@ class CrawlerCache {
   clear(): void {
     this.cache.clear();
     this.crawlCache.clear();
+    this.contentFingerprints.clear();
     log.info('Cache cleared');
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  getStats(): Record<string, number> {
+    return {
+      cacheSize: this.cache.size,
+      crawlCacheSize: this.crawlCache.size,
+      fingerprintsSize: this.contentFingerprints.size,
+      maxAge: this._maxAge,
+      maxSize: this._maxSize,
+    };
   }
 }
 

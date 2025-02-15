@@ -1,3 +1,8 @@
+/**
+ * Advanced documentation crawler with intelligent content analysis and caching.
+ * @module DocumentationCrawler
+ */
+
 import { JSDOM } from 'jsdom';
 import { log } from './logger';
 import { QueueManager } from './queue-manager';
@@ -8,56 +13,100 @@ import {
   shouldCrawl,
   getUrlDepth,
 } from './url-utils';
-import type { PageResult, CrawlerOptions, CrawlerProgress } from './types';
+import type { PageResult, CrawlerOptions, ValidatedCrawlerOptions } from './types';
+import { crawlerOptionsSchema } from './types';
 
 export class DocumentationCrawler {
   private queueManager: QueueManager;
   private contentHashes = new Set<string>();
   private results: PageResult[] = [];
   private baseUrl: string;
-  private options: Required<CrawlerOptions>;
+  private options: ValidatedCrawlerOptions;
+  private abortController: AbortController;
 
   constructor(baseUrl: string, options: CrawlerOptions = {}) {
-    this.baseUrl = baseUrl;
-    this.options = {
-      maxPages: options.maxPages ?? 100,
-      maxDepth: options.maxDepth ?? 3,
-      includeAnchors: options.includeAnchors ?? false,
-      concurrency: options.concurrency ?? 3,
-      timeout: options.timeout ?? 30000,
-      allowedDomains: options.allowedDomains ?? [],
-      excludePatterns: options.excludePatterns ?? [],
-    };
-    this.queueManager = new QueueManager(this.options.concurrency);
-    this.addPage(baseUrl, 0);
+    try {
+      this.baseUrl = new URL(baseUrl).origin;
+      this.options = crawlerOptionsSchema.parse(options);
+      this.abortController = new AbortController();
+
+      this.queueManager = new QueueManager(
+        this.options.maxConcurrentRequests,
+        this.options.rateLimit,
+        this.options.timeout
+      );
+
+      // Set up event handlers for efficient queue management
+      this.setupQueueEvents();
+
+      // Add initial URL to queue
+      this.addPage(baseUrl, 0);
+    } catch (error) {
+      log.error('Failed to initialize crawler:', error);
+      throw error;
+    }
+  }
+
+  private setupQueueEvents(): void {
+    this.queueManager.on('error', (error) => {
+      log.error('Queue error:', error);
+    });
+
+    this.queueManager.on('success', (url: string) => {
+      log.info('Successfully processed:', url);
+    });
+
+    // Cleanup on queue idle
+    this.queueManager.on('queueIdle', () => {
+      this.cleanupMemory();
+    });
+  }
+
+  private cleanupMemory(): void {
+    if (typeof global.gc === 'function') {
+      global.gc();
+    }
   }
 
   private async fetchPage(url: string): Promise<Document | null> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.options.timeout
-      );
-
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Documentation Crawler Bot/1.0',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(this.options.timeout),
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
+      const contentType = response.headers.get('content-type');
+      if (!contentType?.includes('text/html')) {
+        throw new Error(`Invalid content type: ${contentType}`);
+      }
+
       const html = await response.text();
-      const dom = new JSDOM(html);
+      const dom = new JSDOM(html, {
+        url,
+        runScripts: 'outside-only',
+        resources: 'usable',
+      });
+
       return dom.window.document;
     } catch (error) {
       log.error(`Failed to fetch ${url}:`, error);
-      this.queueManager.markError(url);
-      return null;
+      throw error;
     }
   }
 
-  private addPage(url: string, depth: number): void {
+  private addPage(url: string, depth: number, parent?: string): void {
+    // Early return for efficiency
+    if (this.results.length >= this.options.maxPages) {
+      return;
+    }
+
     const normalizedUrl = normalizeUrl(url, this.options.includeAnchors);
 
     if (
@@ -81,40 +130,50 @@ export class DocumentationCrawler {
 
     this.queueManager.markQueued(normalizedUrl);
 
-    this.queueManager.add(async () => {
-      const doc = await this.fetchPage(normalizedUrl);
-      if (!doc) return;
+    this.queueManager.add(
+      async () => {
+        const doc = await this.fetchPage(normalizedUrl);
+        if (!doc) return;
 
-      this.queueManager.markVisited(normalizedUrl);
+        this.queueManager.markVisited(normalizedUrl);
 
-      // Extract and process content
-      const content = extractContent(doc);
-      const hash = hashContent(content);
+        // Memory-efficient content extraction
+        const content = extractContent(doc);
+        const hash = hashContent(content);
 
-      // Skip if we've seen this content before
-      if (this.contentHashes.has(hash)) {
-        return;
-      }
-      this.contentHashes.add(hash);
-
-      // Store the result
-      const result: PageResult = {
-        url: normalizedUrl,
-        title: extractTitle(doc),
-        content,
-        timestamp: Date.now(),
-      };
-      this.results.push(result);
-      this.queueManager.incrementResults();
-
-      // Extract and queue new links
-      if (this.results.length < this.options.maxPages) {
-        const links = extractLinks(doc, normalizedUrl);
-        for (const link of links) {
-          this.addPage(link, depth + 1);
+        // Skip duplicates
+        if (this.contentHashes.has(hash)) {
+          return;
         }
-      }
-    });
+        this.contentHashes.add(hash);
+
+        // Create result with all required fields
+        const result: PageResult = {
+          url: normalizedUrl,
+          title: extractTitle(doc),
+          content,
+          timestamp: Date.now(),
+          status: 'complete',
+          depth,
+          parent,
+        };
+
+        this.results.push(result);
+        this.queueManager.incrementResults();
+
+        // Extract and queue new links efficiently
+        if (this.results.length < this.options.maxPages) {
+          const links = extractLinks(doc, normalizedUrl);
+          for (const link of links) {
+            this.addPage(link, depth + 1, normalizedUrl);
+          }
+        }
+
+        // Clear references to help GC
+        (doc as any) = null;
+      },
+      { url: normalizedUrl, depth, parent }
+    );
   }
 
   public async crawl(): Promise<PageResult[]> {
@@ -123,22 +182,21 @@ export class DocumentationCrawler {
 
     try {
       while (this.queueManager.size > 0 || this.queueManager.pending > 0) {
+        if (this.abortController.signal.aborted) {
+          throw new Error('Crawl aborted');
+        }
         await this.queueManager.onIdle();
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
 
-      const timeElapsed =
-        Date.now() - this.queueManager.getProgress().timeElapsed;
+      const timeElapsed = Date.now() - this.queueManager.getProgress().timeElapsed;
       const stats = {
         ...this.queueManager.getProgress(),
         totalResults: this.results.length,
-        totalTokens: this.results.reduce(
-          (acc, r) => acc + (r.tokenCount ?? 0),
-          0
-        ),
       };
       log.info('Crawl completed:', stats);
 
+      // Return sorted results for consistency
       const sortedResults = [...this.results].sort((a, b) =>
         a.url.localeCompare(b.url)
       );
@@ -153,13 +211,19 @@ export class DocumentationCrawler {
     }
   }
 
+  public abort(): void {
+    this.abortController.abort();
+    this.cleanup();
+  }
+
   private cleanup(): void {
     this.queueManager.clear();
     this.contentHashes.clear();
     this.results = [];
+    this.cleanupMemory();
   }
 
-  public getProgress(): CrawlerProgress {
+  public getProgress() {
     return this.queueManager.getProgress();
   }
 }
