@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite';
-import vercel from 'vite-plugin-vercel';
 import react from '@vitejs/plugin-react';
 import themePlugin from '@replit/vite-plugin-shadcn-theme-json';
 import path, { dirname } from 'path';
@@ -18,7 +17,6 @@ export default defineConfig({
     react(),
     // runtimeErrorOverlay(),
     themePlugin(),
-    vercel(),
   ],
   resolve: {
     alias: {
