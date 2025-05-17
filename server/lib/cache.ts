@@ -48,14 +48,15 @@ class CrawlerCache {
   }
 
   private generateCacheKey(url: string): string {
-    return url.toLowerCase().trim();
+    return url.replace(/\/$/, '').toLowerCase().trim();
   }
 
   private generateCrawlCacheKey(
     startUrl: string,
     settings: Required<CrawlerOptions>
   ): string {
-    return `${startUrl.toLowerCase().trim()}:${JSON.stringify(settings)}`;
+    const normalizedStart = this.generateCacheKey(startUrl);
+    return `${normalizedStart}:${JSON.stringify(settings)}`;
   }
 
   private isExpired(timestamp: number): boolean {
