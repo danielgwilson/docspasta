@@ -134,4 +134,45 @@ describe('CrawlerCache', () => {
     expect(results.every((r) => r !== null)).toBe(true);
     expect(new Set(results.map((r) => r?.title)).size).toBe(1);
   });
+
+  it('should clear cached results', async () => {
+    await crawlerCache.clear();
+    const url = 'https://test.com/clear';
+    const options: Required<CrawlerOptions> = {
+      maxDepth: 1,
+      maxConcurrentRequests: 1,
+      includeCodeBlocks: true,
+      excludeNavigation: true,
+      followExternalLinks: false,
+      timeout: 30000,
+      rateLimit: 1000,
+      includeAnchors: false,
+      discoverBasePath: true,
+      maxRetries: 3,
+    };
+    const result: PageResult = {
+      url,
+      title: 'Clear Test',
+      content: 'Clear content',
+      status: 'complete',
+      depth: 0,
+      parent: undefined,
+      error: '',
+      newLinksFound: 0,
+      hierarchy: [],
+      timestamp: Date.now(),
+    };
+    await crawlerCache.set(url, result);
+    await crawlerCache.setCrawlResults(url, options, [result]);
+
+    crawlerCache.clear();
+
+    const page = await crawlerCache.get(url);
+    const crawl = await crawlerCache.getCrawlResults(url, options);
+
+    expect(page).toBeNull();
+    expect(crawl).toBeNull();
+
+    await crawlerCache.clear();
+  });
 });
