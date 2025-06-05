@@ -203,25 +203,25 @@ export class DocspastaCrawler {
 
           console.log(`📖 Crawling URL ${processedCount + 1}/${discoveredUrls.length}: ${url}`);
           
-          // Update progress
-          await updateCrawlProgress(crawlId, {
-            status: 'processing',
-            processedUrls: processedCount,
-            totalUrls: discoveredUrls.length,
-            currentUrl: url
+          // Update progress BEFORE crawling (showing current page being crawled)
+          memoryStore.updateCrawl(crawlId, { 
+            progress: {
+              currentUrl: url,
+              pageCount: processedCount + 1, // Show the page we're currently crawling
+              totalPages: discoveredUrls.length,
+              status: 'Crawling pages'
+            }
           });
 
           await this.crawlUrl(url, 0, crawlId);
           processedCount++;
 
-          // Update memory store progress
-          memoryStore.updateCrawl(crawlId, { 
-            progress: {
-              currentUrl: url,
-              pageCount: processedCount,
-              totalPages: discoveredUrls.length,
-              status: 'Crawling pages'
-            }
+          // Update Redis progress for tracking
+          await updateCrawlProgress(crawlId, {
+            status: 'processing',
+            processedUrls: processedCount,
+            totalUrls: discoveredUrls.length,
+            currentUrl: url
           });
 
           // Respect crawl delay between requests
@@ -302,7 +302,12 @@ export class DocspastaCrawler {
       // Update final result
       memoryStore.updateCrawl(crawlId, {
         status: 'completed',
-        progress: 100,
+        progress: {
+          currentUrl: startUrl,
+          pageCount: this.crawledPages.length,
+          totalPages: this.crawledPages.length,
+          status: 'Crawl completed'
+        },
         markdown: combinedMarkdown,
         title,
         metadata: {

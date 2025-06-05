@@ -58,7 +58,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<CrawlResp
     // Start actual crawl using the sophisticated V1 engine
     try {
       const crawlId = await startCrawl(url, {
-        maxPages: 5, // Reduced for faster testing
+        maxPages: 10, // Reasonable limit for good UX and comprehensive docs
         maxDepth: 2,
         followExternalLinks: false,
         respectRobots: true,
