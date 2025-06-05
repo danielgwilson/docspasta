@@ -188,9 +188,9 @@ export default function Home() {
             </span>
           </div>
 
-          {/* Main Heading - Significantly Reduced Size */}
-          <div className="space-y-3">
-            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold tracking-tight">
+          {/* Main Heading - Balanced Size */}
+          <div className="space-y-4">
+            <h1 className="text-3xl md:text-5xl lg:text-6xl font-bold tracking-tight">
               <span className="bg-gradient-to-r from-gray-900 via-amber-800 to-orange-800 bg-clip-text text-transparent dark:from-gray-100 dark:via-amber-200 dark:to-orange-200">
                 What docs do you
               </span>
@@ -199,7 +199,7 @@ export default function Home() {
                 want to paste?
               </span>
             </h1>
-            <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
+            <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
               Zero friction docs → markdown for AI chats. Just paste a URL and get beautiful, 
               LLM-ready content in seconds.
             </p>
