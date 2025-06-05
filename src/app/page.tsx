@@ -178,8 +178,8 @@ export default function Home() {
       </header>
 
       {/* Hero Section */}
-      <main className="container mx-auto px-4 py-16 md:py-24">
-        <div className="max-w-4xl mx-auto text-center space-y-8">
+      <main className="container mx-auto px-4 py-8 md:py-12">
+        <div className="max-w-4xl mx-auto text-center space-y-6">
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-amber-100 to-orange-100 border border-amber-200">
             <Sparkles className="w-4 h-4 text-amber-600" />
@@ -188,9 +188,9 @@ export default function Home() {
             </span>
           </div>
 
-          {/* Main Heading */}
-          <div className="space-y-4">
-            <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight">
+          {/* Main Heading - Significantly Reduced Size */}
+          <div className="space-y-3">
+            <h1 className="text-2xl md:text-4xl lg:text-5xl font-bold tracking-tight">
               <span className="bg-gradient-to-r from-gray-900 via-amber-800 to-orange-800 bg-clip-text text-transparent dark:from-gray-100 dark:via-amber-200 dark:to-orange-200">
                 What docs do you
               </span>
@@ -199,14 +199,14 @@ export default function Home() {
                 want to paste?
               </span>
             </h1>
-            <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
+            <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
               Zero friction docs → markdown for AI chats. Just paste a URL and get beautiful, 
               LLM-ready content in seconds.
             </p>
           </div>
 
           {/* Main Input */}
-          <div className="max-w-2xl mx-auto space-y-6">
+          <div className="max-w-2xl mx-auto space-y-4">
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-300"></div>
               <div className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 border border-amber-200/50 shadow-xl">
@@ -246,43 +246,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="space-y-3">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Or try these popular docs:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {QUICK_ACTIONS.map((action) => (
-                  <Button
-                    key={action.url}
-                    variant="outline"
-                    className="h-auto p-4 bg-white/60 dark:bg-gray-800/60 hover:bg-white dark:hover:bg-gray-700 border-amber-200/50 hover:border-amber-300 transition-all duration-200 group"
-                    disabled={isLoading}
-                    onClick={() => handleSubmit(action.url)}
-                  >
-                    <div className="flex flex-col items-start gap-1 w-full">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{action.icon}</span>
-                        <span className="font-medium text-sm group-hover:text-amber-700 transition-colors">
-                          {action.name}
-                        </span>
-                      </div>
-                      {action.badge && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          action.badge.type === 'recommended'
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                        }`}>
-                          {action.badge.text}
-                        </span>
-                      )}
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Error Display */}
+            {/* Error Display - Right after input */}
             {error && (
               <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
@@ -293,12 +257,50 @@ export default function Home() {
               </div>
             )}
 
-            {/* Results Display */}
+            {/* Results Display - Right after input/error */}
             {crawlResult && (
               <CrawlResults
                 result={crawlResult}
                 onCopyMarkdown={copyToClipboard}
               />
+            )}
+
+            {/* Quick Actions - After results */}
+            {!crawlResult && !error && (
+              <div className="space-y-3 pt-2">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Or try these popular docs:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {QUICK_ACTIONS.map((action) => (
+                    <Button
+                      key={action.url}
+                      variant="outline"
+                      className="h-auto p-4 bg-white/60 dark:bg-gray-800/60 hover:bg-white dark:hover:bg-gray-700 border-amber-200/50 hover:border-amber-300 transition-all duration-200 group"
+                      disabled={isLoading}
+                      onClick={() => handleSubmit(action.url)}
+                    >
+                      <div className="flex flex-col items-start gap-1 w-full">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{action.icon}</span>
+                          <span className="font-medium text-sm group-hover:text-amber-700 transition-colors">
+                            {action.name}
+                          </span>
+                        </div>
+                        {action.badge && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            action.badge.type === 'recommended'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                          }`}>
+                            {action.badge.text}
+                          </span>
+                        )}
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
