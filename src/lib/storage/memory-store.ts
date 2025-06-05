@@ -7,7 +7,12 @@ export interface CrawlResult {
   id: string;
   url: string;
   status: 'started' | 'processing' | 'completed' | 'error';
-  progress?: number;
+  progress?: {
+    currentUrl: string;
+    pageCount: number;
+    totalPages: number;
+    status: string;
+  };
   markdown?: string;
   error?: string;
   title?: string;
@@ -15,6 +20,9 @@ export interface CrawlResult {
     totalPages?: number;
     totalTokens?: number;
     crawlDate: string;
+    qualityScore?: number;
+    sitemapUsed?: boolean;
+    robotsRespected?: boolean;
   };
   createdAt: string;
   completedAt?: string;

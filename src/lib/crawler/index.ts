@@ -32,7 +32,7 @@ export interface CrawlProgress {
 }
 
 const DEFAULT_OPTIONS: Required<CrawlOptions> = {
-  maxPages: 50,
+  maxPages: 10, // Reduced from 50 for faster crawls and better UX
   maxDepth: 3,
   followExternalLinks: false, // Don't follow external links during crawling
   includeAnchors: false,
@@ -110,6 +110,16 @@ export class DocspastaCrawler {
       
       if (this.options.useSitemap) {
         console.log(`🗺️  Discovering URLs via sitemap...`);
+        // Update progress for sitemap discovery
+        memoryStore.updateCrawl(crawlId, { 
+          progress: {
+            currentUrl: startUrl,
+            pageCount: 0,
+            totalPages: 1,
+            status: 'Discovering URLs via sitemap'
+          }
+        });
+        
         try {
           const sitemapResult = await crawlSitemaps(startUrl, this.options.maxDepth, this.options.maxPages);
           if (sitemapResult.urls.length > 0) {
@@ -137,6 +147,16 @@ export class DocspastaCrawler {
       
       if (this.options.respectRobots) {
         console.log(`🤖 Checking robots.txt compliance...`);
+        // Update progress for robots check
+        memoryStore.updateCrawl(crawlId, { 
+          progress: {
+            currentUrl: startUrl,
+            pageCount: 0,
+            totalPages: discoveredUrls.length,
+            status: 'Checking robots.txt compliance'
+          }
+        });
+        
         try {
           robotsInfo = await getRobotsInfo(startUrl);
           crawlDelay = Math.max(crawlDelay, robotsInfo.getCrawlDelay());
@@ -195,8 +215,14 @@ export class DocspastaCrawler {
           processedCount++;
 
           // Update memory store progress
-          const progress = Math.min(90, (processedCount / discoveredUrls.length) * 100);
-          memoryStore.updateCrawl(crawlId, { progress });
+          memoryStore.updateCrawl(crawlId, { 
+            progress: {
+              currentUrl: url,
+              pageCount: processedCount,
+              totalPages: discoveredUrls.length,
+              status: 'Crawling pages'
+            }
+          });
 
           // Respect crawl delay between requests
           if (crawlDelay > 0) {
@@ -221,6 +247,16 @@ export class DocspastaCrawler {
 
       // Phase 4: Quality filtering and combination
       const qualityThreshold = this.options.qualityThreshold || DEFAULT_OPTIONS.qualityThreshold;
+      
+      // Update progress for quality assessment
+      memoryStore.updateCrawl(crawlId, { 
+        progress: {
+          currentUrl: startUrl,
+          pageCount: this.crawledPages.length,
+          totalPages: this.crawledPages.length,
+          status: 'Assessing content quality'
+        }
+      });
       
       const qualityFilteredPages = this.crawledPages.filter(page => {
         const quality = assessContentQuality(page.content, 200, page.title, page.url);

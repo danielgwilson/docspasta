@@ -49,6 +49,12 @@ interface CrawlResult {
   status: 'started' | 'processing' | 'completed' | 'error';
   markdown?: string;
   error?: string;
+  progress?: {
+    currentUrl: string;
+    pageCount: number;
+    totalPages: number;
+    status: string;
+  };
 }
 
 export default function Home() {
@@ -136,8 +142,16 @@ export default function Home() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
+      // Copy feedback is now handled in CrawlResults component
     } catch (_err) {
       console.error('Failed to copy text:', _err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
     }
   };
 
