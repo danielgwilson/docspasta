@@ -7,10 +7,17 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    env: {
+      // Load test environment variables
+      NODE_ENV: 'test',
+    },
+    setupFiles: [],
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
+  envDir: '.',
+  envPrefix: ['UPSTASH_', 'KV_', 'REDIS_'],
 })

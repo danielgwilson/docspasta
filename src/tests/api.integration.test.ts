@@ -171,27 +171,42 @@ describe('API Integration Tests', () => {
 
       expect(crawlId).toBeDefined()
 
-      // Wait for processing
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      // Poll for completion (Phase 1 enhanced crawler with better status tracking)
+      let finalStatus;
+      let finalData;
+      let attempts = 0;
+      const maxAttempts = 10;
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        const statusRequest = createMockRequest(`http://localhost:3000/api/crawl/${crawlId}`)
+        const statusResponse = await GET(statusRequest, { 
+          params: Promise.resolve({ id: crawlId }) 
+        })
+        const statusData = await statusResponse.json()
+        
+        expect(statusResponse.status).toBe(200)
+        expect(statusData.success).toBe(true)
+        
+        finalStatus = statusData.data?.status;
+        finalData = statusData.data;
+        
+        // Break if we reach a final state
+        if (finalStatus === 'completed' || finalStatus === 'error') {
+          break;
+        }
+        
+        attempts++;
+      }
 
-      // Check final status
-      const statusRequest = createMockRequest(`http://localhost:3000/api/crawl/${crawlId}`)
+      // Should eventually reach a final state
+      expect(['completed', 'error']).toContain(finalStatus)
       
-      const statusResponse = await GET(statusRequest, { 
-        params: Promise.resolve({ id: crawlId }) 
-      })
-      const statusData = await statusResponse.json()
-
-      expect(statusResponse.status).toBe(200)
-      expect(statusData.success).toBe(true)
-      
-      // Should be completed or have error with reason
-      expect(['completed', 'error']).toContain(statusData.data?.status)
-      
-      if (statusData.data?.status === 'completed') {
-        expect(statusData.data.markdown).toBeDefined()
-        expect(statusData.data.markdown.length).toBeGreaterThan(0)
-        expect(statusData.data.metadata?.totalTokens).toBeGreaterThan(0)
+      if (finalStatus === 'completed') {
+        expect(finalData.markdown).toBeDefined()
+        expect(finalData.markdown.length).toBeGreaterThan(0)
+        expect(finalData.metadata?.totalTokens).toBeGreaterThan(0)
       }
     })
   })
