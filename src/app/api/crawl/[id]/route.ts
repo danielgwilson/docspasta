@@ -7,7 +7,12 @@ interface CrawlStatusResponse {
     id: string;
     url: string;
     status: 'started' | 'processing' | 'completed' | 'error';
-    progress?: number;
+    progress?: {
+      currentUrl: string;
+      pageCount: number;
+      totalPages: number;
+      status: string;
+    };
     markdown?: string;
     error?: string;
     title?: string;
@@ -84,7 +89,12 @@ export async function GET(
         id,
         url: 'https://docspasta.com',
         status: 'completed' as const,
-        progress: 100,
+        progress: {
+          currentUrl: 'https://docspasta.com',
+          pageCount: 1,
+          totalPages: 1,
+          status: 'Farewell complete'
+        },
         markdown: farewellMarkdown,
         title: 'Farewell to Docspasta V1',
         createdAt: new Date().toISOString(),

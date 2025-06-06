@@ -91,7 +91,7 @@ export default function Home() {
       // Poll for results
       const crawlId = data.data.id;
       let attempts = 0;
-      const maxAttempts = 30; // 30 seconds timeout
+      const maxAttempts = 45; // 45 seconds timeout (allows for 20s queue timeout + buffer)
       
       const pollStatus = async () => {
         try {
@@ -266,7 +266,7 @@ export default function Home() {
             )}
 
             {/* Quick Actions - After results */}
-            {!crawlResult && !error && (
+            {!error && (
               <div className="space-y-3 pt-2">
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Or try these popular docs:

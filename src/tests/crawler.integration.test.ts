@@ -5,7 +5,7 @@ import { memoryStore } from '@/lib/storage/memory-store'
 describe('Crawler Integration Tests', () => {
   beforeEach(() => {
     // Clean memory store before each test
-    memoryStore.getAllCrawls().forEach(crawl => {
+    memoryStore.getAllCrawls().forEach(() => {
       memoryStore.clearOldCrawls(0) // Clear all crawls
     })
   })
@@ -136,7 +136,8 @@ describe('Crawler Integration Tests', () => {
     // First crawl
     const crawlId1 = await startCrawl(testUrl, {
       maxPages: 1,
-      delayMs: 100
+      delayMs: 100,
+      qualityThreshold: 20 // Lower threshold for test content
     })
     
     // Wait for completion
@@ -147,7 +148,8 @@ describe('Crawler Integration Tests', () => {
     // Second crawl of same URL
     const crawlId2 = await startCrawl(testUrl, {
       maxPages: 1,
-      delayMs: 100
+      delayMs: 100,
+      qualityThreshold: 20 // Lower threshold for test content
     })
     
     // Should complete faster due to caching

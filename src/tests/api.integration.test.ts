@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server'
 import { memoryStore } from '@/lib/storage/memory-store'
 
 // Mock NextRequest
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createMockRequest(url: string, options: { method?: string; body?: any } = {}) {
   const { method = 'GET', body } = options
   
@@ -20,7 +21,7 @@ function createMockRequest(url: string, options: { method?: string; body?: any }
 describe('API Integration Tests', () => {
   beforeEach(() => {
     // Clean memory store before each test
-    memoryStore.getAllCrawls().forEach(crawl => {
+    memoryStore.getAllCrawls().forEach(() => {
       memoryStore.clearOldCrawls(0) // Clear all crawls
     })
   })

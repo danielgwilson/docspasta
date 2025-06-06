@@ -68,7 +68,7 @@ export async function cacheSitemapUrls(domain: string, urls: string[]): Promise<
   
   const key = `sitemap:${domain}:urls`;
   await redis.del(key); // Clear existing
-  await redis.sadd(key, ...urls);
+  await redis.sadd(key, urls);
   await redis.expire(key, 86400); // Cache for 24 hours
 }
 

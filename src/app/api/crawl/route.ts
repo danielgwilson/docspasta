@@ -58,11 +58,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<CrawlResp
     // Start actual crawl using the sophisticated V1 engine
     try {
       const crawlId = await startCrawl(url, {
-        maxPages: 10, // Reasonable limit for good UX and comprehensive docs
-        maxDepth: 2,
+        maxPages: 200, // COMPREHENSIVE coverage - get ALL the docs for LLM context
+        maxDepth: 4,   // Deep crawling for complete documentation trees
         followExternalLinks: false,
         respectRobots: true,
-        delayMs: 500 // Faster for demo
+        delayMs: 300, // Fast but respectful
+        qualityThreshold: 20 // Lower threshold to capture more content
       });
       
       console.log(`Started crawl with ID: ${crawlId}`);

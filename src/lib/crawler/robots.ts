@@ -101,75 +101,33 @@ export async function getRobotsInfo(baseUrl: string): Promise<RobotsInfo> {
 }
 
 /**
- * Respect crawl delay with Promise-based delay
+ * Check if a specific URL should be crawled according to robots.txt
  */
-export async function respectCrawlDelay(delayMs: number): Promise<void> {
-  if (delayMs > 0) {
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+export async function shouldCrawlUrl(url: string, robotsInfo: RobotsInfo): Promise<{ allowed: boolean; reason?: string; crawlDelay: number }> {
+  try {
+    const allowed = robotsInfo.isAllowed(url);
+    const crawlDelay = robotsInfo.getCrawlDelay();
+    
+    return {
+      allowed,
+      reason: allowed ? undefined : 'Disallowed by robots.txt',
+      crawlDelay
+    };
+  } catch {
+    // Default to allowing on error
+    return {
+      allowed: true,
+      reason: undefined,
+      crawlDelay: 0
+    };
   }
 }
 
 /**
- * Check if URL should be crawled based on robots.txt and our internal rules
+ * Respect crawl delay by waiting
  */
-export async function shouldCrawlUrl(baseUrl: string, targetUrl: string): Promise<{
-  allowed: boolean;
-  reason?: string;
-  crawlDelay: number;
-}> {
-  try {
-    const robotsInfo = await getRobotsInfo(baseUrl);
-    
-    // Check robots.txt permission
-    if (!robotsInfo.isAllowed(targetUrl)) {
-      return {
-        allowed: false,
-        reason: 'Disallowed by robots.txt',
-        crawlDelay: robotsInfo.getCrawlDelay()
-      };
-    }
-    
-    // Additional checks for documentation relevance
-    const urlObj = new URL(targetUrl);
-    
-    // Skip obvious non-documentation paths
-    const skipPaths = [
-      '/login', '/logout', '/signin', '/signup', '/register',
-      '/admin', '/dashboard', '/settings', '/profile',
-      '/cart', '/checkout', '/payment', '/billing',
-      '/search', '/filter', '/sort'
-    ];
-    
-    if (skipPaths.some(path => urlObj.pathname.toLowerCase().includes(path))) {
-      return {
-        allowed: false,
-        reason: 'Non-documentation path detected',
-        crawlDelay: robotsInfo.getCrawlDelay()
-      };
-    }
-    
-    // Skip URLs with query parameters that suggest dynamic/personalized content
-    const skipParams = ['utm_', 'fbclid', 'gclid', 'ref=', 'source=', 'medium='];
-    const searchParams = urlObj.search.toLowerCase();
-    
-    if (skipParams.some(param => searchParams.includes(param))) {
-      return {
-        allowed: false,
-        reason: 'Dynamic/tracking parameters detected',
-        crawlDelay: robotsInfo.getCrawlDelay()
-      };
-    }
-    
-    return {
-      allowed: true,
-      crawlDelay: robotsInfo.getCrawlDelay()
-    };
-    
-  } catch (error) {
-    console.warn(`Error checking if should crawl ${targetUrl}:`, error);
-    return {
-      allowed: true, // Default to allowed on error
-      crawlDelay: 0
-    };
+export async function respectCrawlDelay(delayMs: number): Promise<void> {
+  if (delayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
   }
 }
