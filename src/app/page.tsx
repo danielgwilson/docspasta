@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sparkles, Zap, FileText, XCircle, Copy } from 'lucide-react';
-import { CrawlResults } from '@/components/CrawlResults';
+import { SimpleCrawlResults } from '@/components/SimpleCrawlResults';
 
 const QUICK_ACTIONS = [
   {
     name: 'Lovable',
-    url: 'https://docs.lovable.dev',
+    url: 'https://docs.lovable.dev/introduction',
     badge: { text: 'Recommended', type: 'recommended' as const },
     icon: '💖'
   },
@@ -43,24 +43,12 @@ const QUICK_ACTIONS = [
   },
 ];
 
-interface CrawlResult {
-  id: string;
-  url: string;
-  status: 'started' | 'processing' | 'completed' | 'error';
-  markdown?: string;
-  error?: string;
-  progress?: {
-    currentUrl: string;
-    pageCount: number;
-    totalPages: number;
-    status: string;
-  };
-}
 
 export default function Home() {
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [crawlResult, setCrawlResult] = useState<CrawlResult | null>(null);
+  const [crawlId, setCrawlId] = useState<string | null>(null);
+  const [markdown, setMarkdown] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (urlToSubmit: string) => {
@@ -68,12 +56,13 @@ export default function Home() {
     
     // Clear previous state
     setError(null);
-    setCrawlResult(null);
+    setCrawlId(null);
+    setMarkdown('');
     setIsLoading(true);
     setUrl(urlToSubmit);
     
     try {
-      const response = await fetch('/api/crawl', {
+      const response = await fetch('/api/crawl-v2', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -85,53 +74,12 @@ export default function Home() {
 
       if (!data.success) {
         setError(data.error || 'Failed to start crawl');
+        setIsLoading(false);
         return;
       }
 
-      // Poll for results
-      const crawlId = data.data.id;
-      let attempts = 0;
-      const maxAttempts = 45; // 45 seconds timeout (allows for 20s queue timeout + buffer)
-      
-      const pollStatus = async () => {
-        try {
-          const statusResponse = await fetch(`/api/crawl/${crawlId}`);
-          const statusData = await statusResponse.json();
-          
-          if (statusData.success && statusData.data) {
-            setCrawlResult(statusData.data);
-            
-            if (statusData.data.status === 'completed') {
-              setIsLoading(false); // Stop loading when crawl is complete
-              return;
-            }
-            
-            if (statusData.data.status === 'error') {
-              setError(statusData.data.error || 'Crawl failed');
-              setIsLoading(false);
-              return;
-            }
-          } else {
-            // Handle API error response
-            setError(statusData.error || 'Failed to get crawl status');
-            setIsLoading(false);
-            return;
-          }
-          
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(pollStatus, 1000);
-          } else {
-            setError('Crawl timed out');
-            setIsLoading(false);
-          }
-        } catch {
-          setError('Failed to check crawl status');
-          setIsLoading(false);
-        }
-      };
-      
-      setTimeout(pollStatus, 1000);
+      // Set the crawl ID - the SimpleCrawlResults component will handle everything else
+      setCrawlId(data.data.id);
       
     } catch {
       setError('Failed to start crawl');
@@ -139,20 +87,9 @@ export default function Home() {
     }
   };
 
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      // Copy feedback is now handled in CrawlResults component
-    } catch (_err) {
-      console.error('Failed to copy text:', _err);
-      // Fallback for older browsers
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-    }
+  const handleCrawlComplete = (completedMarkdown: string) => {
+    setMarkdown(completedMarkdown);
+    setIsLoading(false);
   };
 
   return (
@@ -196,7 +133,7 @@ export default function Home() {
               </span>
               <br />
               <span className="bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
-                want to paste?
+                want to pasta?
               </span>
             </h1>
             <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
@@ -258,10 +195,10 @@ export default function Home() {
             )}
 
             {/* Results Display - Right after input/error */}
-            {crawlResult && (
-              <CrawlResults
-                result={crawlResult}
-                onCopyMarkdown={copyToClipboard}
+            {crawlId && (
+              <SimpleCrawlResults
+                crawlId={crawlId}
+                onComplete={handleCrawlComplete}
               />
             )}
 

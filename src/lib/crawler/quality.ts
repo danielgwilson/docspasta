@@ -177,7 +177,13 @@ function calculateScore(factors: QualityFactors, url?: string): {
   if (factors.isLongEnough) {
     score += 20;
   } else {
-    reasons.push('Content too short');
+    // Be more lenient for potential navigation/overview pages
+    if (url && (url.includes('/docs') || url.includes('/documentation'))) {
+      score += 10; // Half points for short docs pages
+      reasons.push('Short documentation page');
+    } else {
+      reasons.push('Content too short');
+    }
   }
   
   // Main content presence (0-25 points)
@@ -256,13 +262,14 @@ export function shouldCrawlBasedOnUrl(url: string): boolean {
   
   // Skip obvious low-quality paths
   const skipPaths = [
-    '/login', '/logout', '/signin', '/signup', '/register',
+    '/logout', '/signout',
     '/cart', '/checkout', '/payment', '/billing',
-    '/admin', '/dashboard', '/settings', '/profile',
-    '/search', '/filter', '/sort', '/compare',
+    '/admin', '/dashboard', 
     '/404', '/500', '/error'
   ];
   
+  // For documentation sites, we might want login/signup pages
+  // as they often contain important getting started info
   if (skipPaths.some(path => urlLower.includes(path))) {
     return false;
   }

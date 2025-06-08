@@ -57,9 +57,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<CrawlResp
       })
     }
 
-    // Ensure worker is running
+    // Ensure worker is running with higher concurrency
     try {
-      await startWorker(5) // 5 concurrent workers
+      await startWorker(3) // Test moderate concurrency - sweet spot
       console.log('✨ Queue worker is running')
     } catch (workerError) {
       console.error('Failed to start worker:', workerError)
@@ -69,16 +69,25 @@ export async function POST(request: NextRequest): Promise<NextResponse<CrawlResp
     // Generate unique crawl ID
     const crawlId = uuidv4()
 
-    // Default crawl options following Firecrawl patterns
+    // Default crawl options optimized for realistic documentation crawling
     const crawlOptions: CrawlOptions = {
-      maxDepth: options.maxDepth || 4,
-      maxPages: options.maxPages || 200,
+      maxDepth: options.maxDepth || 2, // Allow some depth for documentation 
+      maxPages: options.maxPages || 50, // Reasonable limit for docs sites
       respectRobotsTxt: options.respectRobotsTxt ?? true,
-      delay: options.delay || 300,
-      timeout: options.timeout || 30000, // 30 second per-page timeout
-      concurrency: options.concurrency || 5,
+      delay: options.delay || 0, // No delay for maximum speed
+      timeout: options.timeout || 8000, // 8 second per-page timeout for debugging
+      concurrency: options.concurrency || 3, // Test moderate concurrency
       includePatterns: options.includePatterns || [],
       excludePatterns: options.excludePatterns || [],
+      qualityThreshold: options.qualityThreshold ?? 20,
+    }
+
+    // 🚀 TAILWIND FIX: Enhance discovery for sites that commonly lack sitemaps
+    const hostname = parsedUrl.hostname.toLowerCase()
+    if (hostname.includes('tailwindcss.com') || hostname.includes('bootstrap.com') || hostname.includes('bulma.io')) {
+      console.log(`🎯 Detected CSS framework site: ${hostname} - optimizing for link discovery`)
+      crawlOptions.maxDepth = Math.max(crawlOptions.maxDepth || 2, 3) // Increase depth for link discovery
+      crawlOptions.qualityThreshold = Math.min(crawlOptions.qualityThreshold || 20, 15) // Lower threshold for CSS docs
     }
 
     // Add kickoff job to queue

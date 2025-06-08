@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "src/app/api/crawl-v2/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/crawl-v2/[id]/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/crawl-v2/[id]/stream/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}

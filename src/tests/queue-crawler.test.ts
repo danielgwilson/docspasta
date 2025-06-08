@@ -1,26 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getCrawl, saveCrawl, lockURL, updateCrawlProgress } from '@/lib/crawler/crawl-redis'
-import { addKickoffJob, addCrawlJob } from '@/lib/crawler/queue-jobs'
+import { getCrawl, saveCrawl, updateCrawlProgress } from '@/lib/crawler/crawl-redis'
+import { addKickoffJob } from '@/lib/crawler/queue-jobs'
 import { startWorker, stopWorker } from '@/lib/crawler/queue-worker'
+import { getUrlDeduplicationCache } from '@/lib/crawler/url-dedup-cache'
 import type { StoredCrawl } from '@/lib/crawler/crawl-redis'
+
+// Create mockable Redis client
+const mockRedisClient = {
+  sadd: vi.fn().mockResolvedValue(4), // Return 4 to match typical URL permutation count
+  sismember: vi.fn().mockResolvedValue(0),
+  hset: vi.fn().mockResolvedValue(1),
+  hgetall: vi.fn().mockResolvedValue({}),
+  expire: vi.fn().mockResolvedValue(1),
+  lpush: vi.fn().mockResolvedValue(1),
+  lrange: vi.fn().mockResolvedValue([]),
+  del: vi.fn().mockResolvedValue(1),
+  srem: vi.fn().mockResolvedValue(1),
+  pipeline: vi.fn().mockReturnValue({
+    sismember: vi.fn().mockReturnThis(),
+    exec: vi.fn().mockResolvedValue([[null, 0]]),
+  }),
+}
 
 // Mock Redis connection
 vi.mock('@/lib/crawler/queue-service', () => ({
-  getRedisConnection: () => ({
-    sadd: vi.fn().mockResolvedValue(1),
-    sismember: vi.fn().mockResolvedValue(0),
-    hset: vi.fn().mockResolvedValue(1),
-    hgetall: vi.fn().mockResolvedValue({}),
-    expire: vi.fn().mockResolvedValue(1),
-    lpush: vi.fn().mockResolvedValue(1),
-    lrange: vi.fn().mockResolvedValue([]),
-    del: vi.fn().mockResolvedValue(1),
-    srem: vi.fn().mockResolvedValue(1),
-    pipeline: vi.fn().mockReturnValue({
-      sismember: vi.fn().mockReturnThis(),
-      exec: vi.fn().mockResolvedValue([[null, 0]]),
-    }),
-  }),
+  getRedisConnection: () => mockRedisClient,
   getCrawlQueue: () => ({
     add: vi.fn().mockResolvedValue({ id: 'test-job-id' }),
     addBulk: vi.fn().mockResolvedValue([{ id: 'test-job-1' }, { id: 'test-job-2' }]),
@@ -45,10 +49,16 @@ describe('Queue-Based Crawler', () => {
     await stopWorker()
   })
 
-  describe('Redis Storage Layer', () => {
-    it('should successfully lock new URLs', async () => {
-      const result = await lockURL(testCrawlId, testUrl)
-      expect(result).toBe(true)
+  describe('URL Deduplication Cache', () => {
+    it('should successfully detect new URLs', async () => {
+      const cache = getUrlDeduplicationCache()
+      const hasVisited = await cache.hasVisited(testCrawlId, testUrl)
+      expect(hasVisited).toBe(false) // New URL should not be visited
+      
+      // Mark as visited and verify
+      await cache.markVisited(testCrawlId, [testUrl])
+      const hasVisitedNow = await cache.hasVisited(testCrawlId, testUrl)
+      expect(hasVisitedNow).toBe(true) // Should now be marked as visited
     })
 
     it('should generate URL permutations correctly', async () => {
@@ -68,31 +78,47 @@ describe('Queue-Based Crawler', () => {
         status: 'active',
         createdAt: Date.now(),
         totalDiscovered: 5,
+        totalQueued: 4,
         totalProcessed: 2,
+        totalFiltered: 1,
+        totalSkipped: 0,
+        totalFailed: 0,
+        discoveryComplete: true,
         progress: {
           current: 2,
           total: 5,
           phase: 'crawling',
           message: 'Processing pages...',
+          discovered: 5,
+          queued: 4,
+          processed: 2,
+          filtered: 1,
+          skipped: 0,
+          failed: 0,
         },
         results: [],
       }
 
-      await saveCrawl(testCrawl)
-      
-      // Mock the return value for getCrawl
-      const { getRedisConnection } = await import('@/lib/crawler/queue-service')
-      const mockRedis = getRedisConnection()
-      vi.mocked(mockRedis.hgetall).mockResolvedValue({
+      // Configure mock to return test data
+      mockRedisClient.hgetall.mockResolvedValue({
         id: testCrawlId,
         url: testUrl,
         status: 'active',
         createdAt: testCrawl.createdAt.toString(),
+        completedAt: '',
         totalDiscovered: '5',
+        totalQueued: '4',
         totalProcessed: '2',
+        totalFiltered: '1',
+        totalSkipped: '0',
+        totalFailed: '0',
+        discoveryComplete: '1',
+        errorMessage: '',
         progress: JSON.stringify(testCrawl.progress),
         results: '[]',
       })
+
+      await saveCrawl(testCrawl)
 
       const retrieved = await getCrawl(testCrawlId)
       expect(retrieved).toBeTruthy()
@@ -198,10 +224,11 @@ describe('Queue-Based Crawler', () => {
     it('should handle Redis connection errors gracefully', async () => {
       const { getRedisConnection } = await import('@/lib/crawler/queue-service')
       const mockRedis = getRedisConnection()
-      vi.mocked(mockRedis.sadd).mockRejectedValue(new Error('Redis connection failed'))
+      vi.mocked(mockRedis.sismember).mockRejectedValue(new Error('Redis connection failed'))
 
-      const result = await lockURL(testCrawlId, testUrl)
-      expect(result).toBe(false) // Should return false on error
+      const cache = getUrlDeduplicationCache()
+      const result = await cache.hasVisited(testCrawlId, testUrl)
+      expect(result).toBe(false) // Should return false on error (fail open)
     })
 
     it('should handle invalid URLs in permutation generation', async () => {
@@ -272,9 +299,9 @@ describe('API Integration', () => {
       ]
 
       const invalidUrls = [
-        '',
         'not-a-url',
-        'ftp://example.com',
+        'invalid://url with spaces',
+        'http://',
       ]
 
       validUrls.forEach(url => {

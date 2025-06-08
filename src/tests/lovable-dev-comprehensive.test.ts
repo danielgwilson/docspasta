@@ -24,7 +24,7 @@ describe('Lovable.dev Comprehensive Crawl', () => {
     
     try {
       // Start comprehensive crawl of lovable.dev
-      const crawlId = await startCrawl('https://lovable.dev', {
+      const crawlId = await startCrawl('https://docs.lovable.dev/introduction', {
         maxPages: 100, // Allow crawling many pages
         maxDepth: 4,   // Deep crawling
         followExternalLinks: false, // Stay on lovable.dev
@@ -133,9 +133,9 @@ describe('Lovable.dev Comprehensive Crawl', () => {
     
     // Test specific lovable.dev URLs that might have unique characteristics
     const testUrls = [
-      'https://lovable.dev',
-      'https://lovable.dev/docs',
-      'https://www.lovable.dev',
+      'https://docs.lovable.dev/introduction',
+      'https://docs.lovable.dev/quick-start',
+      'https://docs.lovable.dev',
     ]
     
     for (const url of testUrls) {
@@ -168,7 +168,7 @@ describe('Lovable.dev Comprehensive Crawl', () => {
   it('should extract high-quality content from lovable.dev docs', async () => {
     console.log('📚 Testing content quality extraction from lovable.dev...')
     
-    const crawlId = await startCrawl('https://lovable.dev/docs', {
+    const crawlId = await startCrawl('https://docs.lovable.dev/introduction', {
       maxPages: 10,
       maxDepth: 2,
       delayMs: 400,

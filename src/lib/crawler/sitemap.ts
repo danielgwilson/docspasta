@@ -4,7 +4,7 @@
  */
 
 import { parseStringPromise } from 'xml2js';
-import { getCachedSitemapUrls, cacheSitemapUrls } from '../redis';
+import { getRedisConnection } from './queue-service';
 import { isValidDocumentationUrl } from './url-utils';
 import { getRobotsInfo } from './robots';
 
@@ -12,6 +12,28 @@ export interface SitemapResult {
   urls: string[];
   source: 'cache' | 'sitemap' | 'robots' | 'discovery';
   discoveredSitemaps: string[];
+}
+
+/**
+ * Cache sitemap URLs for a domain
+ */
+async function cacheSitemapUrls(domain: string, urls: string[]): Promise<void> {
+  if (urls.length === 0) return;
+  
+  const redis = getRedisConnection();
+  const key = `sitemap:${domain}:urls`;
+  await redis.del(key); // Clear existing
+  await redis.sadd(key, ...urls);
+  await redis.expire(key, 86400); // Cache for 24 hours
+}
+
+/**
+ * Get cached sitemap URLs for a domain
+ */
+async function getCachedSitemapUrls(domain: string): Promise<string[]> {
+  const redis = getRedisConnection();
+  const key = `sitemap:${domain}:urls`;
+  return await redis.smembers(key);
 }
 
 /**

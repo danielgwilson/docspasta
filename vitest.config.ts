@@ -11,7 +11,7 @@ export default defineConfig({
       // Load test environment variables
       NODE_ENV: 'test',
     },
-    setupFiles: [],
+    setupFiles: ['./src/tests/setup-redis-mock.ts', './src/tests/setup-sse-mock.ts'],
   },
   resolve: {
     alias: {

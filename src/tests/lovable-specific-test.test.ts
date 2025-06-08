@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { JSDOM } from 'jsdom'
 import { extractContent, extractTitle } from '../lib/crawler/content-extractor'
 

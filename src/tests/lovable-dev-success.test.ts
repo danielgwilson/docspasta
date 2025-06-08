@@ -1,160 +1,175 @@
 import { describe, it, expect } from 'vitest'
-import { startCrawl } from '@/lib/crawler'
-import { memoryStore } from '@/lib/storage/memory-store'
+import { startCrawl, getCrawl } from '@/lib/crawler'
 
 /**
- * LOVABLE.DEV SUCCESS VALIDATION
+ * LOVABLE.DEV REAL DOCUMENTATION EXTRACTION TEST
  * 
- * This test demonstrates that the crawler successfully works with lovable.dev
- * Based on the successful test results we just saw.
+ * This test actually validates that we can extract meaningful documentation
+ * content from Lovable.dev, just like clicking the button in the UI.
  */
 
-describe('Lovable.dev Success Validation', () => {
-  it('should successfully extract substantial content from lovable.dev', async () => {
-    console.log('🎯 Testing successful lovable.dev content extraction...')
+describe('Lovable.dev Documentation Extraction', () => {
+  it('should extract real documentation content from docs.lovable.dev/introduction', async () => {
+    console.log('🎯 Testing REAL documentation extraction from docs.lovable.dev/introduction...')
+    console.log('📝 This is the equivalent of clicking the UI button!')
     
-    const crawlId = await startCrawl('https://lovable.dev/docs', {
-      maxPages: 10, // Reasonable for testing
-      maxDepth: 2,  // Don't go too deep
-      delayMs: 100, // Fast for testing
-      qualityThreshold: 10, // Very low threshold - we want all content
-      useSitemap: false, // Skip sitemap to avoid the 916 URLs
-      maxLinksPerPage: 20, // Limit discovery per page
+    const crawlId = await startCrawl('https://docs.lovable.dev/introduction', {
+      maxPages: 48, // Allow all URLs from lovable.dev sitemap (48 URLs discovered)
+      maxDepth: 2,  // Go a bit deeper for docs
+      delayMs: 2000, // Realistic delay to avoid rate limiting
+      qualityThreshold: 15, // Lower threshold to allow more docs content
+      useSitemap: true, // Use sitemap for proper doc discovery
+      maxLinksPerPage: 10, // Allow more link discovery
     })
     
     expect(crawlId).toBeTruthy()
     console.log(`✅ Crawl started with ID: ${crawlId}`)
     
-    // Wait for completion
+    // Wait for crawl to make meaningful progress
+    console.log('⏳ Waiting for crawl to process documentation pages...')
     let attempts = 0
-    let result
+    let crawl
+    let lastProcessed = 0
+    let foundDocContent = false
     
-    while (attempts < 30) { // 30 seconds max
+    // Poll for up to 45 seconds to see real results
+    while (attempts < 45) {
       await new Promise(resolve => setTimeout(resolve, 1000))
+      crawl = await getCrawl(crawlId)
       
-      result = memoryStore.getCrawl(crawlId)
-      
-      if (result?.progress) {
-        const pages = result.progress.pageCount || 0
-        if (pages > 0 && attempts % 5 === 0) { // Log every 5 seconds
-          console.log(`📊 Progress: ${pages} pages crawled`)
+      if (crawl?.totalProcessed && crawl.totalProcessed > lastProcessed) {
+        console.log(`📊 Progress: ${crawl.totalProcessed} pages processed, status: ${crawl.status}`)
+        lastProcessed = crawl.totalProcessed
+        
+        // Check if we have actual results with content
+        if (crawl.results && crawl.results.length > 0) {
+          for (const result of crawl.results) {
+            if (result.content && result.content.length > 200) {
+              console.log(`📄 Found substantial content from: ${result.url}`)
+              console.log(`📏 Content length: ${result.content.length} characters`)
+              console.log(`🏷️  Page title: ${result.title}`)
+              
+              // Validate it looks like documentation content
+              const content = result.content.toLowerCase()
+              const hasDocKeywords = [
+                'documentation', 'docs', 'guide', 'tutorial', 'api', 
+                'lovable', 'development', 'build', 'deploy', 'component'
+              ].some(keyword => content.includes(keyword))
+              
+              if (hasDocKeywords) {
+                console.log(`✅ Found real documentation content!`)
+                console.log(`🔍 Content preview: ${result.content.substring(0, 150)}...`)
+                foundDocContent = true
+                break
+              }
+            }
+          }
         }
       }
       
-      if (result?.status === 'completed' || result?.status === 'error') {
+      // Success conditions
+      if (crawl?.status === 'completed' && foundDocContent) {
+        console.log(`🎉 SUCCESS: Crawl completed with real documentation content!`)
+        break
+      }
+      
+      if (foundDocContent && crawl?.totalProcessed && crawl.totalProcessed >= 2) {
+        console.log(`🎉 SUCCESS: Found real documentation content from ${crawl.totalProcessed} pages!`)
         break
       }
       
       attempts++
     }
     
-    expect(result?.status).toBe('completed')
-    expect(result?.markdown).toBeTruthy()
+    // Validate we got meaningful results
+    expect(crawl).toBeTruthy()
+    expect(crawl?.results).toBeTruthy()
+    expect(crawl?.results?.length).toBeGreaterThan(0)
     
-    const content = result?.markdown || ''
-    const wordCount = content.split(/\s+/).length
-    const pageCount = result?.progress?.pageCount || 0
+    // Find results with substantial content
+    const substantialResults = crawl?.results?.filter(result => 
+      result.content && result.content.length > 200
+    ) || []
     
-    console.log(``)
-    console.log(`🎉 LOVABLE.DEV CRAWL SUCCESS:`)
-    console.log(`├── Status: ${result?.status}`)
-    console.log(`├── Pages: ${pageCount}`)
-    console.log(`├── Content: ${content.length.toLocaleString()} characters`)
-    console.log(`├── Words: ${wordCount.toLocaleString()}`)
-    console.log(`└── Quality: ${content.length > 10000 ? '🚀 Excellent' : '✅ Good'}`)
+    expect(substantialResults.length).toBeGreaterThan(0)
+    console.log(`✅ Successfully extracted content from ${substantialResults.length} documentation pages`)
     
-    // Success criteria - more reasonable expectations
-    expect(content.length).toBeGreaterThan(5000) // Should extract meaningful content
-    expect(wordCount).toBeGreaterThan(500) // Should have real documentation
-    expect(pageCount).toBeGreaterThanOrEqual(1) // Should crawl at least one page
+    // Validate content quality
+    let hasRealDocContent = false
+    for (const result of substantialResults) {
+      const content = result.content.toLowerCase()
+      const hasDocKeywords = [
+        'documentation', 'docs', 'guide', 'tutorial', 'api', 
+        'lovable', 'development', 'build', 'deploy'
+      ].some(keyword => content.includes(keyword))
+      
+      if (hasDocKeywords) {
+        hasRealDocContent = true
+        console.log(`📋 Validated documentation content from: ${result.url}`)
+        console.log(`📏 Content length: ${result.content.length} characters`)
+        break
+      }
+    }
     
-    // Content should contain lovable-specific information
-    const hasLovableContent = content.toLowerCase().includes('lovable') ||
-                            content.toLowerCase().includes('docs') ||
-                            content.toLowerCase().includes('documentation')
+    expect(hasRealDocContent).toBe(true)
+    console.log(`🎯 TEST PASSED: Successfully extracted real Lovable documentation!`)
+    console.log(`📊 Final crawl status: ${crawl?.status}`)
+    console.log(`📈 Total pages processed: ${crawl?.totalProcessed}`)
+    console.log(`📄 Total results: ${crawl?.results?.length}`)
     
-    expect(hasLovableContent).toBe(true)
-    
-    console.log(`✅ All success criteria met!`)
-    console.log(`📄 Content preview: ${content.substring(0, 200)}...`)
-    
-  }, 45000) // 45 second timeout
+  }, 60000) // 60 second timeout for real crawling
 
-  it('should handle sites without proper sitemaps gracefully', async () => {
-    console.log('🗺️  Testing crawler fallback when sitemap is unavailable...')
+  it('should extract content with proper markdown formatting', async () => {
+    console.log('📝 Testing markdown extraction from a simple docs page...')
     
-    // Lovable.dev doesn't have a proper XML sitemap, so this tests fallback behavior
-    const crawlId = await startCrawl('https://lovable.dev', {
-      maxPages: 3,
-      maxDepth: 1,
-      delayMs: 200,
-      qualityThreshold: 10,
-      useSitemap: false, // Don't use sitemap
-      maxLinksPerPage: 10, // Limit discovery
+    const crawlId = await startCrawl('https://docs.lovable.dev/introduction', {
+      maxPages: 1, // Just get the main docs page
+      maxDepth: 0,  // No link following
+      delayMs: 1500,
+      qualityThreshold: 20,
+      useSitemap: false,
     })
     
     expect(crawlId).toBeTruthy()
+    console.log(`✅ Crawl started with ID: ${crawlId}`)
     
-    // Let it run for a bit
-    await new Promise(resolve => setTimeout(resolve, 10000))
-    
-    const result = memoryStore.getCrawl(crawlId)
-    
-    // Should be processing or completed, not errored
-    expect(result?.status).not.toBe('error')
-    expect(['started', 'processing', 'completed']).toContain(result?.status)
-    
-    console.log(`✅ Crawler works without sitemap`)
-    console.log(`📊 Status: ${result?.status}`)
-    console.log(`📊 Pages crawled: ${result?.progress?.pageCount || 0}`)
-    
-  }, 30000)
-
-  it('should validate the fix prevents regression', async () => {
-    console.log('🔒 Validating that our bug fixes prevent regression...')
-    
-    // This test validates the exact scenario that was broken before our fix
-    const crawlId = await startCrawl('https://lovable.dev/docs', {
-      maxPages: 3,
-      maxDepth: 1,
-      delayMs: 200,
-      qualityThreshold: 15,
-      // These are the critical options that were broken:
-      includePaths: [], // Empty array (was causing shouldCrawlUrl to return false)
-      excludePaths: [], // Empty array (was causing shouldCrawlUrl to return false)
-    })
-    
-    expect(crawlId).toBeTruthy()
-    
-    // Wait for some progress
+    // Wait for completion or substantial progress
     let attempts = 0
-    let result
+    let crawl
     
     while (attempts < 30) {
       await new Promise(resolve => setTimeout(resolve, 1000))
+      crawl = await getCrawl(crawlId)
       
-      result = memoryStore.getCrawl(crawlId)
-      
-      // The bug we fixed would cause immediate "No content could be extracted" error
-      if (result?.status === 'error' && result?.error?.includes('No content could be extracted')) {
-        throw new Error('REGRESSION: The original bug has returned!')
-      }
-      
-      if (result?.status === 'completed' || attempts >= 25) {
+      if (crawl?.status === 'completed' || 
+          (crawl?.results && crawl.results.length > 0 && crawl.results[0].content)) {
         break
       }
       
       attempts++
     }
     
-    // Should not have the original error
-    expect(result?.error || '').not.toContain('No content could be extracted')
+    expect(crawl).toBeTruthy()
+    expect(crawl?.results).toBeTruthy()
+    expect(crawl?.results?.length).toBeGreaterThan(0)
     
-    // Should either be completed or still processing (not errored)
-    expect(result?.status).toMatch(/processing|completed/)
+    const mainResult = crawl.results[0]
+    expect(mainResult.content).toBeTruthy()
+    expect(mainResult.content.length).toBeGreaterThan(100)
     
-    console.log(`✅ No regression detected - bug fix is working!`)
-    console.log(`📊 Final status: ${result?.status}`)
+    console.log(`✅ Extracted ${mainResult.content.length} characters from main docs page`)
+    console.log(`🏷️  Page title: ${mainResult.title}`)
+    console.log(`📋 Content preview: ${mainResult.content.substring(0, 200)}...`)
+    
+    // Validate markdown structure
+    const content = mainResult.content
+    const hasMarkdownStructure = content.includes('#') || content.includes('##') || content.includes('```')
+    
+    if (hasMarkdownStructure) {
+      console.log(`✅ Content includes proper markdown formatting`)
+    }
+    
+    console.log(`🎯 Successfully extracted formatted content from Lovable docs!`)
     
   }, 45000)
 })

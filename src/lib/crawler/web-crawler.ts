@@ -7,7 +7,6 @@ import { JSDOM } from 'jsdom'
 import { normalizeUrl, isValidDocumentationUrl } from './url-utils'
 import { extractContent, extractTitle } from './content-extractor'
 import { crawlSitemaps } from './sitemap'
-import { getRobotsInfo, shouldCrawlUrl } from './robots'
 import type { CrawlOptions } from './types'
 
 export interface CrawlPageResult {
@@ -34,26 +33,43 @@ export class WebCrawler {
       // Add the starting URL
       discoveredUrls.push(startUrl)
       
-      // Phase 1: Sitemap discovery
+      // Phase 1: Sitemap discovery (limited for performance)
       if (options.respectRobotsTxt !== false) {
         try {
-          const sitemapUrls = await crawlSitemaps(baseUrl)
-          console.log(`🗺️  Found ${sitemapUrls.length} URLs in sitemap`)
+          // Strict limit for performance - documentation sites rarely need more than 50 pages
+          const maxUrls = options.maxPages || 50
+          const sitemapResult = await crawlSitemaps(baseUrl, 3, maxUrls) // Pass maxUrls to sitemap crawler!
+          console.log(`🗺️  Found ${sitemapResult.urls.length} URLs in sitemap`)
           
-          // Filter and validate URLs
-          for (const url of sitemapUrls) {
+          // Filter and validate URLs BEFORE adding to prevent overflow
+          let addedCount = 0
+          for (const url of sitemapResult.urls) {
+            if (addedCount >= maxUrls - 1) break // Leave room for startUrl
             if (this.isUrlAllowed(url, startUrl, options)) {
               discoveredUrls.push(url)
+              addedCount++
             }
+          }
+          
+          // 🚀 FIX: If no sitemap URLs found, we need link discovery later
+          if (sitemapResult.urls.length === 0) {
+            console.log(`🔗 No sitemap found - will rely on link discovery during crawling`)
           }
         } catch (sitemapError) {
           console.warn('⚠️  Sitemap discovery failed:', sitemapError)
         }
       }
       
-      // Remove duplicates and limit
+      // Remove duplicates and apply strict limit
       const uniqueUrls = [...new Set(discoveredUrls)]
-      const limited = uniqueUrls.slice(0, options.maxPages || 100)
+      const maxPages = options.maxPages || 50
+      const limited = uniqueUrls.slice(0, maxPages)
+      
+      // 🚀 ENHANCED: Log discovery strategy for debugging
+      if (limited.length === 1) {
+        console.log(`🔗 Only starting URL found - link discovery will be crucial for finding more pages`)
+        console.log(`📊 Current maxDepth: ${options.maxDepth || 2} - consider increasing for better coverage`)
+      }
       
       console.log(`✨ Discovered ${limited.length} URLs to crawl`)
       return limited
@@ -74,7 +90,7 @@ export class WebCrawler {
       const controller = new AbortController()
       const timeout = setTimeout(() => {
         controller.abort()
-      }, options.timeout || 30000)
+      }, options.timeout || 8000) // Use the timeout from API configuration
 
       const response = await fetch(url, {
         headers: {
@@ -98,11 +114,14 @@ export class WebCrawler {
       const document = dom.window.document
 
       // Extract content and title
-      const content = extractContent(document, url)
+      const content = extractContent(document)
       const title = extractTitle(document) || 'Unknown'
 
-      // Extract links for dynamic discovery
+      // Extract links for dynamic discovery (re-enabled for realistic crawling)
       const links = this.extractLinks(document, url, options)
+      
+      // DEBUG: Always log link extraction 
+      process.stderr.write(`🔗 WEB-CRAWLER DEBUG - Links extracted from ${url}: ${links.length}\n`)
 
       return {
         success: true,
@@ -151,12 +170,12 @@ export class WebCrawler {
         }
 
         // Normalize and validate
-        const normalizedUrl = normalizeUrl(absoluteUrl)
+        const normalizedUrl = normalizeUrl(absoluteUrl, baseUrl, false)
         
-        if (this.isUrlAllowed(normalizedUrl, baseUrl, options)) {
+        if (normalizedUrl && this.isUrlAllowed(normalizedUrl, baseUrl, options)) {
           links.push(normalizedUrl)
         }
-      } catch (error) {
+      } catch {
         // Skip invalid URLs
         continue
       }
@@ -177,8 +196,8 @@ export class WebCrawler {
       const urlObj = new URL(url)
       const baseUrlObj = new URL(baseUrl)
 
-      // Check external links
-      if (!options.followExternalLinks && urlObj.origin !== baseUrlObj.origin) {
+      // Check external links - default to not following external links
+      if (urlObj.origin !== baseUrlObj.origin) {
         return false
       }
 

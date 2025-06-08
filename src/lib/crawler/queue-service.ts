@@ -1,27 +1,44 @@
 import { Queue } from 'bullmq'
 import IORedis from 'ioredis'
 
-export type QueueFunction = () => Queue<any, any, string, any, any, string>
+export type QueueFunction = () => Queue<unknown, unknown, string, unknown, unknown, string>
 
 let crawlQueue: Queue
 let redisConnection: IORedis
 
-// Redis connection with proper configuration
+// Redis connection with proper configuration for Upstash (following official docs)
 export function getRedisConnection() {
   if (!redisConnection) {
-    const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL || 'redis://localhost:6379'
+    // Use Redis TLS URL instead of REST URL for BullMQ compatibility
+    const redisUrl = process.env.REDIS_URL || process.env.KV_URL || 'redis://localhost:6379'
     
-    // For Upstash Redis REST, use regular Redis client with REST URL converted
-    const url = redisUrl.replace('https://', 'redis://')
-    
-    redisConnection = new IORedis(url, {
-      maxRetriesPerRequest: null,
-      retryDelayOnFailover: 100,
-      enableReadyCheck: false,
-      lazyConnect: true,
-    })
-    
-    console.log('🔗 Redis connection created')
+    if (redisUrl.startsWith('rediss://')) {
+      // Secure Redis connection (Upstash) - following official Upstash BullMQ docs
+      const url = new URL(redisUrl)
+      redisConnection = new IORedis({
+        host: url.hostname,
+        port: parseInt(url.port) || 6379,
+        password: url.password,
+        username: url.username || 'default',
+        tls: {}, // Enable TLS for Upstash
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        lazyConnect: true,
+        keepAlive: 30000,
+        retryStrategy: (times) => Math.min(times * 50, 2000),
+      })
+      console.log(`🔗 Upstash Redis TLS connection created: ${url.hostname}:${url.port}`)
+    } else {
+      // Local Redis or non-TLS
+      redisConnection = new IORedis({
+        host: 'localhost',
+        port: 6379,
+        maxRetriesPerRequest: null,
+        enableReadyCheck: false,
+        lazyConnect: true,
+      })
+      console.log('🔗 Local Redis connection created')
+    }
   }
   return redisConnection
 }

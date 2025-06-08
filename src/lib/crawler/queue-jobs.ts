@@ -1,5 +1,6 @@
 import { getCrawlQueue } from './queue-service'
 import type { CrawlJobData, KickoffJobData } from './types'
+import { v4 as uuidv4 } from 'uuid'
 
 /**
  * Queue job management following Firecrawl patterns
@@ -26,13 +27,20 @@ export async function addCrawlJob(data: CrawlJobData): Promise<string> {
   const queue = getCrawlQueue()
   
   try {
-    const job = await queue.add('crawl', data, {
+    const jobId = uuidv4()
+    await queue.add('crawl', { ...data, jobId }, {
       priority: 5, // Normal priority for crawl jobs
       delay: data.delay || 0,
+      jobId, // Use our custom UUID
+      attempts: 3, // Retry failed jobs up to 3 times (matching Firecrawl)
+      backoff: {
+        type: 'exponential',
+        delay: 2000, // Start with 2 second delay, exponentially increase
+      },
     })
     
     console.log(`📄 Added crawl job: ${data.url}`)
-    return job.id!.toString()
+    return jobId
   } catch (error) {
     console.error('❌ Failed to add crawl job:', error)
     throw error
@@ -43,17 +51,27 @@ export async function addCrawlJobs(jobs: CrawlJobData[]): Promise<string[]> {
   const queue = getCrawlQueue()
   
   try {
-    const queueJobs = jobs.map((data, index) => ({
-      name: 'crawl',
-      data,
-      opts: {
-        priority: 5,
-        delay: data.delay || 0,
+    const jobIds: string[] = []
+    const queueJobs = jobs.map((data) => {
+      const jobId = uuidv4()
+      jobIds.push(jobId)
+      return {
+        name: 'crawl',
+        data: { ...data, jobId },
+        opts: {
+          priority: 5,
+          delay: data.delay || 0,
+          jobId, // Use our custom UUID
+          attempts: 3, // Retry failed jobs up to 3 times (matching Firecrawl)
+          backoff: {
+            type: 'exponential',
+            delay: 2000, // Start with 2 second delay, exponentially increase
+          },
+        }
       }
-    }))
+    })
     
-    const addedJobs = await queue.addBulk(queueJobs)
-    const jobIds = addedJobs.map(job => job.id!.toString())
+    await queue.addBulk(queueJobs)
     
     console.log(`📦 Added ${jobs.length} crawl jobs`)
     return jobIds
@@ -75,7 +93,7 @@ export async function getCrawlJobCounts(crawlId: string) {
     ])
     
     // Filter by crawlId
-    const filterByCrawlId = (jobs: any[]) => 
+    const filterByCrawlId = (jobs: Array<{data?: {crawlId?: string}}>) => 
       jobs.filter(job => job.data?.crawlId === crawlId)
     
     return {

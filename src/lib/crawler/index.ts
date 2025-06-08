@@ -1,19 +1,17 @@
 /**
- * Modern Crawler Integration Point
+ * Queue-Based Crawler System
  * 
- * This file provides the main interface for crawling functionality.
- * The new ModernCrawler implements a pure queue-based architecture
- * with real-time progress tracking and individual page timeouts.
+ * This file provides the main interface for the modern queue-based 
+ * crawling functionality using BullMQ and Redis for enterprise-grade
+ * job management and real-time progress tracking.
  */
 
-import { ModernCrawler, type CrawlOptions as ModernCrawlOptions } from './modern-crawler';
-import { memoryStore, type CrawlResult } from '../storage/memory-store';
+import { v4 as uuidv4 } from 'uuid';
+import { addKickoffJob } from './queue-jobs';
+import { startWorker } from './queue-worker';
+import type { CrawlOptions as QueueCrawlOptions } from './types';
 
-// Export the modern crawler and its types
-export { ModernCrawler };
-export type { ModernCrawlOptions };
-
-// Legacy interfaces for backwards compatibility
+// Public crawl options interface
 export interface CrawlOptions {
   maxPages?: number;
   maxDepth?: number;
@@ -28,120 +26,57 @@ export interface CrawlOptions {
   maxLinksPerPage?: number;
 }
 
-export interface CrawlProgress {
-  currentUrl: string;
-  pageCount: number;
-  totalPages: number;
-  status: string;
-}
-
 /**
- * Legacy DocspastaCrawler - forwards to ModernCrawler
- * @deprecated Use ModernCrawler directly for new implementations
- */
-export class DocspastaCrawler {
-  private modernCrawler: ModernCrawler;
-
-  constructor(options: CrawlOptions = {}) {
-    console.log('⚠️  Using legacy DocspastaCrawler - consider upgrading to ModernCrawler directly');
-    
-    // Convert legacy options to modern options
-    const modernOptions: ModernCrawlOptions = {
-      maxPages: options.maxPages,
-      maxDepth: options.maxDepth,
-      concurrency: 3,
-      pageTimeout: 5000,
-      delayMs: options.delayMs,
-      followExternalLinks: options.followExternalLinks,
-      respectRobots: options.respectRobots,
-      useSitemap: options.useSitemap,
-      qualityThreshold: options.qualityThreshold,
-      includePaths: options.includePaths,
-      excludePaths: options.excludePaths,
-      maxLinksPerPage: options.maxLinksPerPage,
-    };
-
-    this.modernCrawler = new ModernCrawler(modernOptions);
-  }
-
-  /**
-   * Legacy crawl method - forwards to ModernCrawler
-   * @deprecated Use ModernCrawler.crawl() directly
-   */
-  async crawl(startUrl: string, crawlId: string): Promise<void> {
-    return this.modernCrawler.crawl(startUrl, crawlId);
-  }
-
-  /**
-   * Get crawler statistics
-   */
-  getStats() {
-    return this.modernCrawler.getStats();
-  }
-}
-
-/**
- * Start a new crawl using the modern crawler
+ * Start a new crawl using the queue-based system
+ * 
+ * @param url - The URL to start crawling from
+ * @param options - Crawl configuration options
+ * @returns The unique crawl ID
  */
 export async function startCrawl(url: string, options: CrawlOptions = {}): Promise<string> {
-  const crawlId = `crawl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const crawlId = uuidv4();
   
-  console.log(`🚀 Creating modern crawl with ID: ${crawlId} for URL: ${url}`);
+  console.log(`🚀 Starting queue-based crawl with ID: ${crawlId} for URL: ${url}`);
   
-  // Store initial crawl state
-  const crawlResult: CrawlResult = {
-    id: crawlId,
-    url,
-    status: 'started',
-    progress: {
-      currentUrl: url,
-      pageCount: 0,
-      totalPages: 1,
-      status: 'Initializing modern crawler'
-    },
-    createdAt: new Date().toISOString()
-  };
+  // Ensure worker is running with higher concurrency for better performance
+  try {
+    await startWorker(10); // Increased for better parallelism
+    console.log('✨ Queue worker is running');
+  } catch (workerError) {
+    console.error('Worker start error (may already be running):', workerError);
+  }
   
-  memoryStore.setCrawl(crawlId, crawlResult);
-  
-  // Verify storage
-  const stored = memoryStore.getCrawl(crawlId);
-  console.log(`Stored crawl verification:`, stored ? 'SUCCESS' : 'FAILED');
-
-  // Convert legacy options to modern options
-  const modernOptions: ModernCrawlOptions = {
-    maxPages: options.maxPages,
-    maxDepth: options.maxDepth,
-    concurrency: 3,
-    pageTimeout: 5000,
-    delayMs: options.delayMs,
-    followExternalLinks: options.followExternalLinks,
-    respectRobots: options.respectRobots,
-    useSitemap: options.useSitemap,
-    qualityThreshold: options.qualityThreshold,
-    includePaths: options.includePaths,
-    excludePaths: options.excludePaths,
-    maxLinksPerPage: options.maxLinksPerPage,
+  // Convert public options to internal queue options  
+  const queueOptions: QueueCrawlOptions = {
+    maxDepth: options.maxDepth || 3,
+    maxPages: options.maxPages || 50,
+    respectRobotsTxt: options.respectRobots ?? true,
+    delay: options.delayMs || 100,
+    timeout: 8000, // 8 second per-page timeout (much faster)
+    concurrency: 5,
+    includePatterns: options.includePaths || [],
+    excludePatterns: options.excludePaths || [],
+    qualityThreshold: options.qualityThreshold ?? 20,
   };
 
-  // Start crawling with ModernCrawler in background
-  const crawler = new ModernCrawler(modernOptions);
-  
-  crawler.crawl(url, crawlId).catch(error => {
-    console.error('💥 Modern crawler error:', error);
-    memoryStore.updateCrawl(crawlId, {
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error',
-      completedAt: new Date().toISOString()
+  // Add kickoff job to queue
+  try {
+    await addKickoffJob({
+      crawlId,
+      url,
+      options: queueOptions,
     });
-  });
-
-  return crawlId;
+    
+    console.log(`✅ Crawl started with ID: ${crawlId}`);
+    
+    return crawlId;
+  } catch (error) {
+    console.error('❌ Failed to start crawl:', error);
+    throw error;
+  }
 }
 
-/**
- * Get crawl status and result
- */
-export function getCrawlResult(crawlId: string): CrawlResult | null {
-  return memoryStore.getCrawl(crawlId);
-}
+// Re-export types and utilities from the queue-based system
+export type { CrawlResult, CrawlProgress, CrawlStatus } from './types';
+export { getCrawl } from './crawl-redis';
+export { getCrawlJobCounts } from './queue-jobs';

@@ -4,12 +4,30 @@
  */
 
 import robotsParser from 'robots-parser';
-import { getCachedRobotsTxt, cacheRobotsTxt } from '../redis';
+import { getRedisConnection } from './queue-service';
 
 export interface RobotsInfo {
   isAllowed: (url: string) => boolean;
   getCrawlDelay: () => number;
   getSitemaps: () => string[];
+}
+
+/**
+ * Cache robots.txt content
+ */
+async function cacheRobotsTxt(domain: string, content: string): Promise<void> {
+  const redis = getRedisConnection();
+  const key = `robots:${domain}`;
+  await redis.setex(key, 3600, content); // Cache for 1 hour
+}
+
+/**
+ * Get cached robots.txt content
+ */
+async function getCachedRobotsTxt(domain: string): Promise<string | null> {
+  const redis = getRedisConnection();
+  const key = `robots:${domain}`;
+  return await redis.get(key);
 }
 
 /**
@@ -67,13 +85,11 @@ export async function getRobotsInfo(baseUrl: string): Promise<RobotsInfo> {
       
       getCrawlDelay: () => {
         try {
-          // Get crawl delay for our user agent, fallback to generic
+          // Get crawl delay for our user agent or generic
           const delay = robots.getCrawlDelay('DocspastaCrawler') ?? 
                        robots.getCrawlDelay('*') ?? 
                        0;
-          
-          // Cap at reasonable maximum (10 seconds)
-          return Math.min(delay * 1000, 10000);
+          return Math.max(0, delay * 1000); // Convert to milliseconds
         } catch {
           return 0; // No delay on error
         }
@@ -87,9 +103,8 @@ export async function getRobotsInfo(baseUrl: string): Promise<RobotsInfo> {
         }
       }
     };
-    
   } catch (error) {
-    console.warn(`Error processing robots.txt for ${baseUrl}:`, error);
+    console.error('Error processing robots.txt:', error);
     
     // Return permissive defaults on error
     return {
@@ -101,33 +116,48 @@ export async function getRobotsInfo(baseUrl: string): Promise<RobotsInfo> {
 }
 
 /**
- * Check if a specific URL should be crawled according to robots.txt
+ * Check if a URL should be crawled based on robots.txt and patterns
  */
-export async function shouldCrawlUrl(url: string, robotsInfo: RobotsInfo): Promise<{ allowed: boolean; reason?: string; crawlDelay: number }> {
+export function shouldCrawlUrl(
+  url: string, 
+  robotsInfo: RobotsInfo,
+  includePatterns: string[] = [],
+  excludePatterns: string[] = []
+): boolean {
   try {
-    const allowed = robotsInfo.isAllowed(url);
-    const crawlDelay = robotsInfo.getCrawlDelay();
+    // First check robots.txt
+    if (!robotsInfo.isAllowed(url)) {
+      return false;
+    }
     
-    return {
-      allowed,
-      reason: allowed ? undefined : 'Disallowed by robots.txt',
-      crawlDelay
-    };
+    const urlObj = new URL(url);
+    const path = urlObj.pathname;
+    
+    // Check exclude patterns first (they take precedence)
+    if (excludePatterns.length > 0) {
+      for (const pattern of excludePatterns) {
+        if (new RegExp(pattern).test(path)) {
+          return false;
+        }
+      }
+    }
+    
+    // Check include patterns (if specified, URL must match at least one)
+    if (includePatterns.length > 0) {
+      let matchesInclude = false;
+      for (const pattern of includePatterns) {
+        if (new RegExp(pattern).test(path)) {
+          matchesInclude = true;
+          break;
+        }
+      }
+      if (!matchesInclude) {
+        return false;
+      }
+    }
+    
+    return true;
   } catch {
-    // Default to allowing on error
-    return {
-      allowed: true,
-      reason: undefined,
-      crawlDelay: 0
-    };
-  }
-}
-
-/**
- * Respect crawl delay by waiting
- */
-export async function respectCrawlDelay(delayMs: number): Promise<void> {
-  if (delayMs > 0) {
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    return false; // Don't crawl on error
   }
 }
