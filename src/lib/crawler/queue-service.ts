@@ -5,6 +5,7 @@ export type QueueFunction = () => Queue<unknown, unknown, string, unknown, unkno
 
 let crawlQueue: Queue
 let redisConnection: IORedis
+let pubSubConnection: IORedis
 
 // Redis connection with proper configuration for Upstash (following official docs)
 export function getRedisConnection() {

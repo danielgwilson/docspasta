@@ -90,8 +90,41 @@ export async function POST(request: NextRequest): Promise<NextResponse<CrawlResp
       crawlOptions.qualityThreshold = Math.min(crawlOptions.qualityThreshold || 20, 15) // Lower threshold for CSS docs
     }
 
-    // Add kickoff job to queue
+    // Pre-save crawl record so SSE can find it immediately
     try {
+      const { saveCrawl } = await import('@/lib/crawler/crawl-redis')
+      
+      // Save initial crawl record
+      console.log(`💾 Pre-saving crawl record for ${crawlId}`)
+      await saveCrawl({
+        id: crawlId,
+        url,
+        status: 'active',
+        createdAt: Date.now(),
+        totalDiscovered: 0,
+        totalQueued: 0,
+        totalProcessed: 0,
+        totalFiltered: 0,
+        totalSkipped: 0,
+        totalFailed: 0,
+        discoveryComplete: false,
+        progress: {
+          current: 0,
+          total: 0,
+          phase: 'initializing',
+          message: 'Starting crawl...',
+          discovered: 0,
+          queued: 0,
+          processed: 0,
+          filtered: 0,
+          skipped: 0,
+          failed: 0,
+        },
+        results: [],
+      })
+      console.log(`✅ Pre-saved crawl record for ${crawlId}`)
+      
+      // Add kickoff job to queue
       await addKickoffJob({
         crawlId,
         url,

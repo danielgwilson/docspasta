@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sparkles, Zap, FileText, XCircle, Copy } from 'lucide-react';
-import { SimpleCrawlResults } from '@/components/SimpleCrawlResults';
+import { QueueSSECrawlResults } from '@/components/QueueSSECrawlResults';
 
 const QUICK_ACTIONS = [
   {
@@ -196,7 +196,7 @@ export default function Home() {
 
             {/* Results Display - Right after input/error */}
             {crawlId && (
-              <SimpleCrawlResults
+              <QueueSSECrawlResults
                 crawlId={crawlId}
                 onComplete={handleCrawlComplete}
               />
