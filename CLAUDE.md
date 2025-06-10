@@ -157,3 +157,102 @@ UPSTASH_REDIS_REST_TOKEN="..."
 - Check URL deduplication cache is working
 - Monitor Redis connection and operations
 - Test with vitest performance benchmarks
+
+## Advanced Debugging Techniques
+
+### Multi-User System Debugging
+When debugging multi-user issues (SSE, WebSockets, real-time features):
+
+1. **Session-Based Logging**: Always include unique session IDs in logs
+   ```typescript
+   const sessionId = `sse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+   console.log(`[${sessionId}] Processing event for user`)
+   ```
+
+2. **Progressive Validation**: Implement multiple validation layers
+   ```typescript
+   // 1. Channel/connection validation
+   if (channel !== expectedChannel) return
+   
+   // 2. State validation
+   if (isConnectionClosed) return
+   
+   // 3. Data validation
+   if (eventData.userId !== expectedUserId) return
+   ```
+
+3. **Resource Cleanup**: Always implement proper cleanup to prevent contamination
+   ```typescript
+   // Cleanup on disconnect/abort
+   request.signal.addEventListener('abort', () => {
+     cleanup()
+   })
+   ```
+
+### Frontend-Backend Event Debugging
+
+1. **Data Structure Investigation**: Always log complete event structures
+   ```typescript
+   console.log(`[UI] Received event:`, data.type, data)
+   ```
+
+2. **Fallback Chain Pattern**: Handle nested data structures gracefully
+   ```typescript
+   const value = data.nested?.field || data.field || previousValue || defaultValue
+   ```
+
+3. **UI State Transitions**: Debug why UI gets "stuck" by checking conditions
+   ```typescript
+   // Instead of rigid conditions like: if (total > 0)
+   // Use flexible conditions: if (total > 0 || processed > 0 || hasActivity)
+   ```
+
+### Component Export and Import Issues
+
+1. **Always provide both default and named exports** for React components:
+   ```typescript
+   function MyComponent() { /* ... */ }
+   
+   export default MyComponent
+   export { MyComponent }
+   ```
+
+2. **Check import patterns** when components fail to load:
+   ```typescript
+   // This works with both export styles
+   import MyComponent from './MyComponent'
+   // OR
+   import { MyComponent } from './MyComponent'
+   ```
+
+### Real-time Progress Display Debugging
+
+1. **Percentage Overflow Prevention**: Always cap calculated values
+   ```typescript
+   const percentage = Math.min(calculated || fallback, 100)
+   const width = Math.min(percentage, 100)
+   ```
+
+2. **Progress Bar Visibility**: Use flexible conditions for showing progress
+   ```typescript
+   // Instead of: {total > 0 && <ProgressBar />}
+   // Use: {(total > 0 || processed > 0 || hasActivity) && <ProgressBar />}
+   ```
+
+3. **Consistent Number Display**: Avoid conflicting progress numbers
+   ```typescript
+   // Filter duplicate messages
+   if (message.toLowerCase().includes('process')) return
+   
+   // Use consistent data sources
+   const displayTotal = total || discoveredUrls || '?'
+   ```
+
+### Testing Complex Multi-User Scenarios
+
+1. **Create Isolated Test Cases**: Test each validation layer separately
+2. **Use Session Simulation**: Mock multiple user sessions in tests
+3. **Verify Cleanup**: Test resource cleanup and prevent memory leaks
+4. **Event Structure Testing**: Test both old and new data formats
+
+These patterns apply beyond this project and are valuable for any real-time, multi-user system debugging.
