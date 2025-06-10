@@ -8,18 +8,27 @@ export async function GET(
 ) {
   const { id: crawlId } = await params
 
+  // 🔒 CRITICAL: Generate unique session ID for this SSE connection
+  const sessionId = `sse-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  
   // Create a transform stream for Server-Sent Events with Redis pub/sub
   const encoder = new TextEncoder()
   let subscriber: ReturnType<typeof getRedisConnection> | null = null
+  let isControllerClosed = false
   
   const stream = new ReadableStream({
     async start(controller) {
-      console.log(`📡 Starting real-time stream for crawl: ${crawlId}`)
+      console.log(`📡 [${sessionId}] Starting isolated stream for crawl: ${crawlId}`)
       
       try {
-        // Send initial connection event
+        // Send initial connection event with session ID for debugging
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: 'connected', crawlId })}\n\n`)
+          encoder.encode(`data: ${JSON.stringify({ 
+            type: 'connected', 
+            crawlId,
+            sessionId,
+            timestamp: Date.now()
+          })}\n\n`)
         )
 
         // Get initial progress snapshot for recovery
@@ -56,14 +65,34 @@ export async function GET(
           console.log(`📷 No progress snapshot for crawl ${crawlId}, will wait for events`)
         }
 
-        // Set up Redis subscription for real-time updates
+        // 🔒 CRITICAL: Create isolated Redis subscriber for this specific session
         subscriber = getRedisConnection().duplicate()
         await subscriber.subscribe(`crawl:${crawlId}:progress`)
         
         subscriber.on('message', async (channel: string, message: string) => {
           try {
-            if (channel === `crawl:${crawlId}:progress`) {
-              const eventData = JSON.parse(message)
+            // 🔒 SECURITY: Only process events for the exact crawl ID this session is subscribed to
+            if (channel !== `crawl:${crawlId}:progress`) {
+              console.log(`⚠️  [${sessionId}] Ignoring event from wrong channel: ${channel}`)
+              return
+            }
+
+            // 🔒 ISOLATION: Check if controller is still open before processing
+            if (isControllerClosed) {
+              console.log(`⚠️  [${sessionId}] Controller closed, ignoring event`)
+              return
+            }
+
+            const eventData = JSON.parse(message)
+            
+            // 🔒 VALIDATION: Double-check that event data matches this crawl ID
+            const eventCrawlId = eventData.crawlId || eventData.id
+            if (eventCrawlId && eventCrawlId !== crawlId) {
+              console.log(`⚠️  [${sessionId}] Event crawl ID mismatch: got ${eventCrawlId}, expected ${crawlId}`)
+              return
+            }
+            
+            console.log(`📨 [${sessionId}] Processing event for crawl ${crawlId}:`, eventData.type)
               
               // Convert streaming progress event to SSE format
               let sseUpdate: Record<string, unknown>
@@ -185,62 +214,115 @@ export async function GET(
                 }
               }
 
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify(sseUpdate)}\n\n`)
-              )
-            }
+              // 🔒 SAFETY: Final check before sending event
+              if (!isControllerClosed) {
+                try {
+                  // Add session metadata for debugging
+                  const eventWithSession = {
+                    ...sseUpdate,
+                    _sessionId: sessionId,
+                    _crawlId: crawlId
+                  }
+                  
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify(eventWithSession)}\n\n`)
+                  )
+                  console.log(`✅ [${sessionId}] Event sent successfully for crawl ${crawlId}`)
+                } catch (enqueueError) {
+                  console.error(`❌ [${sessionId}] Failed to enqueue event:`, enqueueError)
+                  isControllerClosed = true
+                }
+              }
           } catch (parseError) {
             console.error('Error parsing progress event:', parseError)
           }
         })
 
         subscriber.on('error', (error: Error) => {
-          console.error('Redis subscription error:', error)
+          console.error(`❌ [${sessionId}] Redis subscription error for crawl ${crawlId}:`, error)
+          
+          // 🔒 SAFETY: Only send error if controller is still open
+          if (!isControllerClosed) {
+            try {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'error', 
+                  error: 'Subscription error',
+                  sessionId,
+                  crawlId
+                })}\n\n`)
+              )
+            } catch (err) {
+              console.error(`❌ [${sessionId}] Failed to send error event:`, err)
+            }
+            isControllerClosed = true
+            controller.close()
+          }
+        })
+
+        console.log(`✅ [${sessionId}] Isolated stream established for crawl: ${crawlId}`)
+        
+      } catch (error) {
+        console.error(`❌ [${sessionId}] Error setting up stream for crawl ${crawlId}:`, error)
+        
+        // 🔒 SAFETY: Mark as closed and cleanup
+        isControllerClosed = true
+        
+        try {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ 
               type: 'error', 
-              error: 'Subscription error' 
+              error: 'Failed to establish stream',
+              sessionId,
+              crawlId
             })}\n\n`)
           )
-          controller.close()
-        })
-
-        console.log(`✅ Real-time stream established for crawl: ${crawlId}`)
-        
-      } catch (error) {
-        console.error('Error setting up stream:', error)
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ 
-            type: 'error', 
-            error: 'Failed to establish stream' 
-          })}\n\n`)
-        )
+        } catch (err) {
+          console.error(`❌ [${sessionId}] Failed to send setup error:`, err)
+        }
         controller.close()
       }
     },
     
     cancel() {
-      console.log(`📡 Client disconnected from real-time stream: ${crawlId}`)
+      console.log(`📡 [${sessionId}] Client disconnected from stream: ${crawlId}`)
+      isControllerClosed = true
+      
+      // 🔒 CLEANUP: Properly cleanup Redis subscriber for this session
       if (subscriber) {
-        subscriber.unsubscribe()
-        subscriber.quit()
+        try {
+          subscriber.unsubscribe(`crawl:${crawlId}:progress`)
+          subscriber.quit()
+          console.log(`🧹 [${sessionId}] Redis subscriber cleaned up for crawl ${crawlId}`)
+        } catch (cleanupError) {
+          console.error(`⚠️  [${sessionId}] Error during Redis cleanup:`, cleanupError)
+        }
       }
     }
   })
 
-  // Clean up subscription if request is aborted
+  // 🔒 CRITICAL: Enhanced cleanup on request abort to prevent contamination
   request.signal.addEventListener('abort', () => {
+    console.log(`🛑 [${sessionId}] Request aborted for crawl ${crawlId}`)
+    isControllerClosed = true
+    
     if (subscriber) {
-      subscriber.unsubscribe()
-      subscriber.quit()
+      try {
+        subscriber.unsubscribe(`crawl:${crawlId}:progress`)
+        subscriber.quit()
+        console.log(`🧹 [${sessionId}] Abort cleanup completed for crawl ${crawlId}`)
+      } catch (abortError) {
+        console.error(`⚠️  [${sessionId}] Error during abort cleanup:`, abortError)
+      }
     }
   })
 
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',  // 🔒 Prevent caching/transformation
       'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',  // 🔒 Prevent proxy buffering  
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET',
       'Access-Control-Allow-Headers': 'Cache-Control',

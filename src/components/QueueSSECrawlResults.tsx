@@ -8,6 +8,7 @@ import { Copy, Check } from 'lucide-react'
 interface QueueSSEEvent {
   type: string
   crawlId?: string
+  id?: string
   status?: string
   phase?: string
   processed?: number
@@ -22,6 +23,46 @@ interface QueueSSEEvent {
   error?: string
   message?: string
   timestamp: number
+  progress?: {
+    phase?: string
+    current?: number
+    processed?: number
+    total?: number
+    percentage?: number
+    discovered?: number
+    discoveredUrls?: number
+    failed?: number
+    failedUrls?: number
+    message?: string
+    currentActivity?: string
+  }
+  data?: {
+    id?: string
+    status?: string
+    markdown?: string
+    results?: any[]
+    timestamp?: number
+    progress?: {
+      phase?: string
+      current?: number
+      processed?: number
+      total?: number
+      percentage?: number
+      discovered?: number
+      discoveredUrls?: number
+      failed?: number
+      failedUrls?: number
+      message?: string
+      currentActivity?: string
+      currentUrl?: string
+      batch?: {
+        current?: number
+        total?: number
+        processed?: number
+        failed?: number
+      }
+    }
+  }
 }
 
 interface QueueSSECrawlResultsProps {
@@ -29,7 +70,7 @@ interface QueueSSECrawlResultsProps {
   onComplete?: (markdown: string) => void
 }
 
-export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResultsProps) {
+function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResultsProps) {
   const [progress, setProgress] = useState({
     phase: 'idle',
     processed: 0,
@@ -44,9 +85,28 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
   const [markdown, setMarkdown] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const sessionId = useRef(`ui-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
+  
+  // 🔒 CRITICAL: Enhanced validation for multi-user isolation
+  const isValidEvent = (eventData: any) => {
+    const eventCrawlId = eventData.crawlId || eventData.id || eventData._crawlId
+    
+    // Primary validation: crawl ID must match
+    if (!eventCrawlId || eventCrawlId !== crawlId) {
+      console.log(`[UI ${sessionId.current}] Rejecting event - crawl ID mismatch: got ${eventCrawlId}, expected ${crawlId}`)
+      return false
+    }
+    
+    // Secondary validation: if event has session info, log it for debugging
+    if (eventData._sessionId) {
+      console.log(`[UI ${sessionId.current}] Event from SSE session ${eventData._sessionId} for crawl ${crawlId}`)
+    }
+    
+    return true
+  }
 
   const startSSEConnection = () => {
-    console.log('[Queue SSE] Starting SSE connection for crawlId:', crawlId)
+    console.log(`[Queue SSE ${sessionId.current}] Starting SSE connection for crawlId:`, crawlId)
     
     // Reset state
     setProgress({
@@ -56,7 +116,7 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
       percentage: 0,
       discoveredUrls: 0,
       failedUrls: 0,
-      currentActivity: 'Connecting to crawl...',
+      currentActivity: 'Starting real-time connection...',
     })
     setError(null)
     setMarkdown(null)
@@ -79,58 +139,90 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
     eventSource.onmessage = (event) => {
       try {
         const data: QueueSSEEvent = JSON.parse(event.data)
-        console.log('[Queue SSE] Received event:', data.type, data)
+        console.log(`[UI ${sessionId.current}] Received event:`, data.type, `for crawl: ${data.crawlId || data.id || data._crawlId || 'unknown'}`, data)
+        
+        // 🔒 CRITICAL: Only process events for THIS component's crawl ID
+        if (!isValidEvent(data)) {
+          return // Already logged in isValidEvent
+        }
         
         switch (data.type) {
           case 'connected':
+            setProgress(prev => ({
+              ...prev,
+              phase: 'initializing',
+              currentActivity: 'Connected! Waiting for crawl to start...',
+            }))
             break
             
           case 'initial_status':
+            // 🔧 CRITICAL FIX: Access nested initial status data correctly
+            const initialData = data.data?.progress || data.progress || data
             setProgress(prev => ({
               ...prev,
-              phase: data.progress?.phase || 'active',
-              processed: data.progress?.processed || 0,
-              total: data.progress?.total || 0,
-              percentage: data.progress?.percentage || 0,
-              discoveredUrls: data.progress?.discoveredUrls || 0,
-              failedUrls: data.progress?.failedUrls || 0,
-              currentActivity: data.progress?.message || 'Resuming crawl...',
+              phase: initialData.phase || data.phase || 'active',
+              processed: initialData.processed || initialData.current || data.processed || 0,
+              total: initialData.total || data.total || 0,
+              percentage: initialData.percentage || data.percentage || 0,
+              discoveredUrls: initialData.discovered || initialData.discoveredUrls || data.discoveredUrls || 0,
+              failedUrls: initialData.failed || initialData.failedUrls || data.failedUrls || 0,
+              currentActivity: initialData.message || initialData.currentActivity || data.message || 'Resuming crawl...',
             }))
+            console.log(`[UI ${sessionId.current}] Initial status loaded:`, {
+              phase: initialData.phase,
+              processed: initialData.processed || initialData.current,
+              total: initialData.total
+            })
             break
             
           case 'progress':
+            // 🔧 CRITICAL FIX: Access nested progress fields correctly
+            const progressData = data.progress || data.data?.progress || data
             setProgress(prev => ({
               ...prev,
-              phase: data.phase || prev.phase,
-              processed: data.processed ?? prev.processed,
-              total: data.total ?? prev.total,
-              percentage: data.percentage ?? prev.percentage,
-              discoveredUrls: data.discoveredUrls ?? prev.discoveredUrls,
-              failedUrls: data.failedUrls ?? prev.failedUrls,
-              currentActivity: data.currentActivity || data.message || prev.currentActivity,
+              phase: progressData.phase || data.phase || prev.phase,
+              processed: progressData.processed || progressData.current || (data.processed ?? prev.processed),
+              total: progressData.total || (data.total ?? prev.total),
+              percentage: progressData.percentage || (data.percentage ?? prev.percentage),
+              discoveredUrls: progressData.discovered || progressData.discoveredUrls || (data.discoveredUrls ?? prev.discoveredUrls),
+              failedUrls: progressData.failed || progressData.failedUrls || (data.failedUrls ?? prev.failedUrls),
+              currentActivity: progressData.currentActivity || progressData.message || data.currentActivity || data.message || prev.currentActivity,
             }))
+            console.log(`[UI ${sessionId.current}] Updated progress:`, {
+              phase: progressData.phase,
+              processed: progressData.processed || progressData.current,
+              total: progressData.total,
+              percentage: progressData.percentage
+            })
             break
             
           case 'completed':
-            console.log('[Queue SSE] Crawl completed successfully')
+            console.log(`[UI ${sessionId.current}] Crawl completed successfully`)
             setProgress(prev => ({
               ...prev,
               phase: 'completed',
               currentActivity: 'Crawl completed successfully!',
             }))
             
-            if (data.markdown) {
-              setMarkdown(data.markdown)
+            // 🔧 CRITICAL FIX: Access nested completion data correctly
+            const completionData = data.data || data
+            const markdown = completionData.markdown || data.markdown
+            const results = completionData.results || data.results
+            
+            if (markdown) {
+              setMarkdown(markdown)
               setError(null) // Clear any previous errors
-              onComplete?.(data.markdown)
-            } else if (data.results) {
+              onComplete?.(markdown)
+              console.log(`[UI ${sessionId.current}] Received markdown: ${markdown.length} characters`)
+            } else if (results) {
               // Build markdown from results
-              const combinedMarkdown = data.results
+              const combinedMarkdown = results
                 .map((r: any) => `# ${r.title}\n\n> Source: ${r.url}\n\n${r.content}`)
                 .join('\n\n---\n\n')
               setMarkdown(combinedMarkdown)
               setError(null)
               onComplete?.(combinedMarkdown)
+              console.log(`[UI ${sessionId.current}] Built markdown from ${results.length} results`)
             }
             
             // Close connection after completion
@@ -172,10 +264,7 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
       }
     }
 
-    eventSource.onclose = () => {
-      console.log('[Queue SSE] EventSource closed')
-      setIsConnected(false)
-    }
+    // EventSource doesn't have onclose event - handled via onerror and manual close
   }
 
   // Start SSE connection when crawlId is provided
@@ -207,6 +296,8 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
       case 'starting':
       case 'initializing':
         return '🚀 Starting crawler...'
+      case 'connecting':
+        return '📡 Connecting to crawl...'
       case 'discovery':
       case 'discovering':
         return '🗺️ Discovering URLs...'
@@ -219,6 +310,9 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
         return '❌ Crawl failed'
       default:
         if (isConnected && !markdown && !error) {
+          if (progress.total === 0) {
+            return '⏳ Waiting for crawl to start...'
+          }
           return '🔄 Processing...'
         }
         return '⏸️ Idle'
@@ -253,23 +347,33 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
         </div>
 
         {/* Current Activity */}
-        {progress.currentActivity && (
+        {progress.currentActivity && !progress.currentActivity.toLowerCase().includes('process') ? (
           <div className="text-sm text-muted-foreground text-left">
             {progress.currentActivity}
           </div>
-        )}
+        ) : isConnected && progress.total === 0 ? (
+          <div className="text-sm text-muted-foreground text-left flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+            Connected! Crawler is starting up...
+          </div>
+        ) : !isConnected ? (
+          <div className="text-sm text-muted-foreground text-left flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+            Connecting to real-time updates...
+          </div>
+        ) : null}
 
-        {/* Progress Bar */}
-        {progress.total > 0 && (
+        {/* Progress Bar - Show when we have real progress */}
+        {(progress.total > 0 || progress.processed > 0 || progress.discoveredUrls > 0) && (
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span>Progress: {Math.min(progress.processed, progress.total)} / {progress.total}</span>
-              <span>{Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%</span>
+              <span>Pages: {Math.min(progress.processed, progress.total || progress.processed)} / {progress.total || progress.discoveredUrls || '?'}</span>
+              <span>{Math.min(progress.percentage || (progress.total > 0 ? Math.round(progress.processed / progress.total * 100) : (progress.discoveredUrls > 0 ? Math.round(progress.processed / progress.discoveredUrls * 100) : 0)), 100)}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
                 className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${Math.min((progress.processed / progress.total) * 100, 100)}%` }}
+                style={{ width: `${Math.min(progress.percentage || (progress.total > 0 ? Math.round(progress.processed / progress.total * 100) : (progress.discoveredUrls > 0 ? Math.round(progress.processed / progress.discoveredUrls * 100) : 0)), 100)}%` }}
               />
             </div>
           </div>
@@ -338,10 +442,13 @@ export function QueueSSECrawlResults({ crawlId, onComplete }: QueueSSECrawlResul
         {/* Debug info for development */}
         {process.env.NODE_ENV === 'development' && (
           <div className="text-xs text-muted-foreground">
-            Phase: {progress.phase} | Connected: {isConnected ? 'Yes' : 'No'}
+            Session: {sessionId.current} | Phase: {progress.phase} | Connected: {isConnected ? 'Yes' : 'No'}
           </div>
         )}
       </div>
     </Card>
   )
 }
+
+export default QueueSSECrawlResults
+export { QueueSSECrawlResults }

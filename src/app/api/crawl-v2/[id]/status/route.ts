@@ -7,9 +7,9 @@ export const maxDuration = 300 // 5 minutes for long crawls
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const crawlId = params.id
+  const { id: crawlId } = await params
   
   console.log(`📡 Starting SSE polling stream for crawl: ${crawlId}`)
 
