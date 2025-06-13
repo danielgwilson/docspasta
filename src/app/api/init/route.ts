@@ -5,15 +5,15 @@ import { startDevProcessor } from '@/lib/serverless/dev-processor'
 let initialized = false
 
 export async function GET() {
-  // V4 migration: Disabled old dev processor
-  // if (!initialized && process.env.NODE_ENV === 'development') {
-  //   initialized = true
-  //   startDevProcessor()
-  // }
+  // Enable dev processor for V4 in development
+  if (!initialized && process.env.NODE_ENV === 'development') {
+    initialized = true
+    startDevProcessor()
+  }
   
   return NextResponse.json({ 
     initialized: true,
     environment: process.env.NODE_ENV,
-    message: 'V4 migration: Dev processor disabled' 
+    message: 'V4 dev processor enabled' 
   })
 }

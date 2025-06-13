@@ -112,8 +112,16 @@ export function isWithinPathPrefix(url: string, baseUrl: string): boolean {
       return false
     }
     
+    // Ensure base path ends with / for proper prefix matching
+    let basePath = baseParsed.pathname
+    if (!basePath.endsWith('/')) {
+      basePath += '/'
+    }
+    
     // Check if URL path starts with base path
-    return urlParsed.pathname.startsWith(baseParsed.pathname)
+    // This prevents matching /docsomething when base is /docs/
+    return urlParsed.pathname === baseParsed.pathname || 
+           urlParsed.pathname.startsWith(basePath)
   } catch {
     return false
   }

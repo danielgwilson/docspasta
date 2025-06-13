@@ -5,43 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Sparkles } from 'lucide-react';
 import ServerlessProgressV2 from '@/components/ServerlessProgressV2';
 
-const QUICK_ACTIONS = [
-  {
-    name: 'Lovable',
-    url: 'https://docs.lovable.dev/',
-    badge: { text: 'Recommended', type: 'recommended' as const },
-    icon: '💖'
-  },
-  {
-    name: 'Next.js',
-    url: 'https://nextjs.org/docs',
-    badge: { text: 'Popular', type: 'popular' as const },
-    icon: '⚡'
-  },
-  {
-    name: 'Tailwind CSS',
-    url: 'https://tailwindcss.com/docs',
-    badge: { text: 'Popular', type: 'popular' as const },
-    icon: '🎨'
-  },
-  {
-    name: 'React',
-    url: 'https://react.dev/',
-    badge: { text: 'Popular', type: 'popular' as const },
-    icon: '⚛️'
-  },
-  {
-    name: 'TypeScript',
-    url: 'https://www.typescriptlang.org/docs/',
-    icon: '📘'
-  },
-  {
-    name: 'Supabase',
-    url: 'https://supabase.com/docs',
-    icon: '🗄️'
-  },
-];
-
 export default function Home() {
   // Initialize dev processor in development
   useEffect(() => {
@@ -102,45 +65,6 @@ export default function Home() {
 
           {/* Serverless Progress Component */}
           <ServerlessProgressV2 />
-
-          {/* Quick Actions */}
-          <div className="space-y-3 pt-2">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Or try these popular docs:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {QUICK_ACTIONS.map((action) => (
-                <Button
-                  key={action.url}
-                  variant="outline"
-                  className="h-auto p-4 bg-white/60 dark:bg-gray-800/60 hover:bg-white dark:hover:bg-gray-700 border-amber-200/50 hover:border-amber-300 transition-all duration-200 group"
-                  onClick={() => {
-                    // This will be handled by ServerlessProgressV2 component
-                    const event = new CustomEvent('quickaction-v2', { detail: action.url });
-                    window.dispatchEvent(event);
-                  }}
-                >
-                  <div className="flex flex-col items-start gap-1 w-full">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{action.icon}</span>
-                      <span className="font-medium text-sm group-hover:text-amber-700 transition-colors">
-                        {action.name}
-                      </span>
-                    </div>
-                    {action.badge && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        action.badge.type === 'recommended'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                      }`}>
-                        {action.badge.text}
-                      </span>
-                    )}
-                  </div>
-                </Button>
-              ))}
-            </div>
-          </div>
         </div>
       </main>
     </div>

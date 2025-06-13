@@ -11,7 +11,7 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
     },
-    setupFiles: ['./src/tests/setup-eventsource-mock.ts'],
+    setupFiles: ['./src/tests/setup-eventsource-mock.ts', './src/tests/setup-integration.ts'],
     testTimeout: 30000, // 30 seconds for integration tests
   },
   resolve: {

@@ -198,6 +198,27 @@ export async function storeSSEEvent(jobId: string, eventType: string, eventData:
   return eventId
 }
 
+export async function getCombinedMarkdown(jobId: string) {
+  const result = await sql`
+    SELECT 
+      j.url,
+      j.final_markdown as content,
+      j.pages_processed as "pageCount",
+      COALESCE(
+        (SELECT p.title FROM pages p 
+         WHERE p.job_id = j.id 
+         ORDER BY p.created_at 
+         LIMIT 1), 
+        'Documentation'
+      ) as title
+    FROM jobs j
+    WHERE j.id = ${jobId}
+      AND j.status = 'completed'
+      AND j.final_markdown IS NOT NULL
+  `
+  return result[0] || null
+}
+
 export async function getSSEEvents(jobId: string, afterEventId?: string) {
   if (afterEventId) {
     // Get events after a specific event ID (for resume)
