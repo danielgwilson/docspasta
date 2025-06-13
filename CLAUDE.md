@@ -1,10 +1,47 @@
 # CLAUDE.md
 
+🚨 **MOST CRITICAL RULE**: **ALWAYS USE RESUMABLE-STREAM FOR SSE** 🚨
+- **NEVER** implement custom ReadableStream for SSE
+- **NEVER** handle Last-Event-ID manually
+- **ALWAYS** copy the V3 pattern that uses resumable-stream
+- See `STOP_REINVENTING_RESUMABLE_STREAM.md` for why this keeps happening
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-Docspasta V2 is a high-performance documentation crawler built with Next.js 15, featuring an enterprise-grade queue-based architecture using BullMQ and Redis for batch processing. The system achieves 20-50x performance improvements over traditional single-URL crawling through memory-first deduplication and concurrent batch processing.
+**MIGRATION IN PROGRESS**: Docspasta V2 is transitioning from BullMQ + Redis workers to a **Vercel-native serverless architecture**. The new system uses PostgreSQL + Vercel KV + Cron + resumable-stream SSE for optimal serverless deployment.
+
+**Current Status**: Phase 3 complete (core infrastructure, APIs, frontend). Now implementing critical optimizations: PostgreSQL SKIP LOCKED queues, fan-out processing, and Vercel KV adapters.
+
+## Gemini Collaboration Policy
+
+**CRITICAL**: **Always collaborate with Gemini MCP at major decision points and implementation steps**. Use `mcp__gemini__thinkdeep` for:
+
+- **Architecture decisions** and design validation
+- **Complex problem analysis** and alternative solutions  
+- **Performance optimization** strategies and trade-off analysis
+- **Error investigation** and debugging approaches
+- **Implementation planning** for multi-step changes
+
+### When to Consult Gemini
+1. **Before major code changes**: Get architectural review and validation
+2. **When encountering complex bugs**: Deep analysis and debugging strategies  
+3. **For performance optimizations**: Trade-off analysis and best practices
+4. **During implementation planning**: Break down complex tasks and identify risks
+5. **When research is needed**: Validate approaches against current best practices
+
+### Collaboration Pattern
+```typescript
+// 1. Share current analysis and context with Gemini
+// 2. Request specific focus areas (architecture, performance, security, etc.)
+// 3. Use "high" thinking mode for complex problems
+// 4. Enable web search for current best practices
+// 5. Synthesize Gemini insights with your own analysis
+// 6. Make informed decisions based on combined perspective
+```
+
+**Remember**: Gemini provides deep technical analysis and alternative perspectives. Always combine Gemini's insights with your own expertise for optimal decision-making.
 
 ## Development Commands
 
@@ -46,15 +83,24 @@ The vitest integration tests are comprehensive and catch issues faster than manu
 - **Content Processing**: `content-extractor.ts`, `quality.ts` - Content extraction and quality assessment
 
 #### Data Storage
-- **Redis Operations**: `crawl-redis.ts` - Core Redis operations for crawl metadata
+- **Redis Operations**: `crawl-redis.ts` - Core Redis operations for crawl metadata  
 - **Redis Fixed**: `crawl-redis-fixed.ts` - Atomic completion logic to prevent race conditions
+- **Database Persistence**: `src/lib/db/` - Neon PostgreSQL with Drizzle ORM for durability
+- **State Reconciliation**: `src/hooks/useCrawlHistoryWithDB.ts` - UI state recovery after server restarts
 
 ### Architecture Flow
 ```
-User Request → API (crawl-v2) → Kickoff Job → Sitemap Discovery → Batch Jobs → 
+User Request → API (crawl-v2) → Database Record Creation → Kickoff Job → Sitemap Discovery → Batch Jobs → 
 URL Deduplication Cache → Concurrent Crawling → Quality Assessment → 
-Real-time Progress Streaming → Completion Detection
+Real-time Progress Streaming (Redis + Database) → Completion Detection → Database Finalization
 ```
+
+### Enhanced Database Integration (NEW)
+- **Dual Persistence**: Redis for immediate access + PostgreSQL for durability
+- **Resumable SSE Streams**: Event replay after disconnection using database-stored events
+- **Server Restart Recovery**: Complete crawl state survives server restarts
+- **UI State Reconciliation**: localStorage cleanup and sync with database state
+- **Copy-Only UX**: Enhanced RecentCrawls with proper visual feedback and stale item removal
 
 ### Batch Processing Architecture
 - **Kickoff Jobs**: Discover URLs from sitemaps and robots.txt
@@ -157,6 +203,55 @@ UPSTASH_REDIS_REST_TOKEN="..."
 - Check URL deduplication cache is working
 - Monitor Redis connection and operations
 - Test with vitest performance benchmarks
+
+## Date Library Policy
+
+**CRITICAL**: This project uses **Luxon** exclusively for all date/time operations. NEVER use date-fns, moment.js, or any other date library. Always import from 'luxon' for date formatting, manipulation, and display.
+
+```typescript
+import { DateTime } from 'luxon'
+
+// Preferred patterns:
+DateTime.now().toRelative() // "2 hours ago"
+DateTime.fromMillis(timestamp).toRelative() // Convert timestamp to relative
+DateTime.fromISO(isoString).toFormat('MMM d, yyyy') // Format dates
+```
+
+## Database Migration Policy (Neon + Drizzle)
+
+**CRITICAL**: This project follows **Neon's recommended migration approach** instead of using `drizzle-kit push`. Based on Neon documentation, using pooled connections for migrations can cause errors.
+
+### Migration Commands
+```bash
+# Generate migrations (using CLI flags, not drizzle.config.ts)
+pnpm db:generate    # drizzle-kit generate --dialect=postgresql --schema=./src/lib/db/schema.ts --out=./drizzle/migrations
+
+# Apply migrations (using custom script with direct connection)  
+pnpm db:migrate     # tsx ./src/lib/db/migrate.ts
+```
+
+### Key Principles
+- **NEVER use `drizzle-kit push`** - Neon docs don't recommend this approach
+- **NEVER use pooled connections for migrations** - Always use direct (non-pooled) DATABASE_URL_UNPOOLED
+- **Use TEXT instead of VARCHAR** - Better performance and flexibility in modern PostgreSQL
+- **Generate migrations with explicit CLI flags** - More reliable than config-file approach
+- **Apply migrations with custom scripts** - Better error handling and environment loading
+
+### Schema Design Best Practices
+```typescript
+// ✅ Good - Use TEXT for string fields
+id: text('id').primaryKey()
+status: text('status').notNull().default('active')
+
+// ❌ Bad - Avoid VARCHAR constraints  
+id: varchar('id', { length: 36 }).primaryKey()
+status: varchar('status', { length: 20 }).notNull()
+```
+
+### Connection Strategy
+- **Migrations**: Use `DATABASE_URL_UNPOOLED` (direct connection)
+- **Application**: Use `DATABASE_URL` (pooled connection for better performance)
+- **Edge Runtime**: Use `@neondatabase/serverless` driver
 
 ## Advanced Debugging Techniques
 
