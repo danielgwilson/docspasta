@@ -7,17 +7,17 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    envDir: '.',
     env: {
-      // Load test environment variables
       NODE_ENV: 'test',
     },
-    setupFiles: ['./src/tests/setup-redis-mock.ts', './src/tests/setup-sse-mock.ts'],
+    setupFiles: ['./src/tests/setup-eventsource-mock.ts'],
+    testTimeout: 30000, // 30 seconds for integration tests
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
-  envDir: '.',
-  envPrefix: ['UPSTASH_', 'KV_', 'REDIS_'],
+  envPrefix: ['UPSTASH_', 'KV_', 'REDIS_', 'DATABASE_', 'POSTGRES_', 'NEON_'],
 })

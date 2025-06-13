@@ -180,12 +180,12 @@ export default function ServerlessProgress() {
                 <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
-                View detailed event stream ({events.length} events)
+                View detailed event stream ({events.filter(e => e && e.type).length} events)
               </div>
             </summary>
             <Card className="mt-3 p-4 max-h-96 overflow-y-auto">
               <div className="space-y-2 text-sm">
-                {events.map((event, index) => (
+                {events.filter(event => event && event.type).map((event, index) => (
                   <div key={index} className="flex items-start gap-2 py-1 border-b border-gray-100 dark:border-gray-800 last:border-0">
                     <span className="text-gray-500 text-xs tabular-nums">
                       {event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : 'Now'}
