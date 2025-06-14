@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { createResumableStreamContext } from 'resumable-stream'
 import { createClient } from 'redis'
 import { waitUntil } from '@vercel/functions'
+import PQueue from 'p-queue'
 import { 
   getJob, 
   updateJobStatus,
@@ -33,15 +34,194 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
       let lastHeartbeat = Date.now()
       let totalProcessed = 0
       let totalDiscovered = 0
+      let isShuttingDown = false
       
-      // In-memory queue of URLs to process
-      const urlQueue: { url: string; depth: number }[] = []
+      // Create p-queue for concurrency control
+      const queue = new PQueue({ concurrency: MAX_CONCURRENT_CRAWLS })
+      
+      // In-memory tracking
       const processedUrls = new Set<string>()
-      const processingUrls = new Set<string>()
+      const discoveredUrls = new Set<string>()
+      
+      // Variables to be set after job is loaded
+      let job: any
+      let forceRefresh: boolean
+      
+      // Function to process a single URL
+      const processUrl = async (url: string, depth: number) => {
+        // Skip if already processed or shutting down
+        if (processedUrls.has(url) || isShuttingDown) {
+          return
+        }
+        
+        try {
+          // Mark as processed immediately to avoid duplicates
+          processedUrls.add(url)
+          
+          // Send url_started event
+          const startEvent = {
+            type: 'url_started',
+            url,
+            depth,
+            timestamp: new Date().toISOString()
+          }
+          controller.enqueue(`event: url_started\ndata: ${JSON.stringify(startEvent)}\nid: start-${Date.now()}-${Math.random()}\n\n`)
+          await storeSSEEvent(jobId, 'url_started', startEvent)
+          
+          // Call crawler for single URL
+          const response = await fetch(
+            `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/v4/crawl`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                jobId, 
+                urls: [{ url, depth }],
+                originalJobUrl: job.url,
+                forceRefresh
+              }),
+              signal: AbortSignal.timeout(30000) // 30s timeout
+            }
+          )
+          
+          if (!response.ok) {
+            throw new Error(`Crawler responded with ${response.status}`)
+          }
+          
+          const result = await response.json()
+          
+          // Process the result
+          if (result.completed && result.completed.length > 0) {
+            const crawled = result.completed[0]
+            totalProcessed++
+            
+            // Send url_crawled event
+            const crawledEvent = {
+              type: 'url_crawled',
+              url: crawled.url,
+              success: true,
+              content_length: crawled.content?.length || 0,
+              title: crawled.title,
+              quality: crawled.quality,
+              timestamp: new Date().toISOString()
+            }
+            controller.enqueue(`event: url_crawled\ndata: ${JSON.stringify(crawledEvent)}\nid: crawled-${Date.now()}-${Math.random()}\n\n`)
+            await storeSSEEvent(jobId, 'url_crawled', crawledEvent)
+            
+            // Handle discovered URLs
+            if (crawled.discoveredUrls && crawled.discoveredUrls.length > 0 && depth < 3) {
+              const newUrls = crawled.discoveredUrls.filter((u: string) => !processedUrls.has(u) && !discoveredUrls.has(u))
+              
+              if (newUrls.length > 0) {
+                newUrls.forEach((u: string) => discoveredUrls.add(u))
+                totalDiscovered += newUrls.length
+                
+                // Send urls_discovered event
+                const discoveredEvent = {
+                  type: 'urls_discovered',
+                  source_url: crawled.url,
+                  discovered_urls: newUrls,
+                  count: newUrls.length,
+                  total_discovered: totalDiscovered,
+                  timestamp: new Date().toISOString()
+                }
+                controller.enqueue(`event: urls_discovered\ndata: ${JSON.stringify(discoveredEvent)}\nid: discovered-${Date.now()}-${Math.random()}\n\n`)
+                await storeSSEEvent(jobId, 'urls_discovered', discoveredEvent)
+                
+                // Add discovered URLs to queue (don't await, let them process in parallel)
+                if (!isShuttingDown) {
+                  newUrls.forEach((newUrl: string) => {
+                    queue.add(() => processUrl(newUrl, depth + 1))
+                  })
+                }
+              }
+            }
+            
+            // Send to processing endpoint
+            if (crawled.content) {
+              const processResult = {
+                url: crawled.url,
+                content: crawled.content,
+                title: crawled.title || crawled.url,
+                quality: crawled.quality || { score: 0, reason: 'unknown' },
+                wordCount: crawled.content.split(/\s+/).length
+              }
+              
+              // Send sent_to_processing event
+              const processingEvent = {
+                type: 'sent_to_processing',
+                url: crawled.url,
+                word_count: processResult.wordCount,
+                timestamp: new Date().toISOString()
+              }
+              controller.enqueue(`event: sent_to_processing\ndata: ${JSON.stringify(processingEvent)}\nid: processing-${Date.now()}-${Math.random()}\n\n`)
+              await storeSSEEvent(jobId, 'sent_to_processing', processingEvent)
+              
+              // Fire and forget - don't await
+              fetch(
+                `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/v4/process`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jobId, results: [processResult] })
+                }
+              ).catch(err => console.error('Process endpoint failed:', err))
+            }
+            
+            // Send progress event
+            const progressEvent = {
+              type: 'progress',
+              processed: totalProcessed,
+              discovered: totalDiscovered,
+              queued: queue.size,
+              pending: queue.pending,
+              timestamp: new Date().toISOString()
+            }
+            controller.enqueue(`event: progress\ndata: ${JSON.stringify(progressEvent)}\nid: progress-${Date.now()}-${Math.random()}\n\n`)
+            await storeSSEEvent(jobId, 'progress', progressEvent)
+            
+          } else if (result.failed && result.failed.length > 0) {
+            // Handle failed crawl
+            const failed = result.failed[0]
+            const errorEvent = {
+              type: 'url_failed',
+              url: failed.url,
+              error: failed.error || 'Unknown error',
+              timestamp: new Date().toISOString()
+            }
+            controller.enqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
+            await storeSSEEvent(jobId, 'url_failed', errorEvent)
+          }
+          
+        } catch (error) {
+          // Handle crawl error
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+          const errorEvent = {
+            type: 'url_failed',
+            url,
+            error: errorMessage,
+            timestamp: new Date().toISOString()
+          }
+          controller.enqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
+          await storeSSEEvent(jobId, 'url_failed', errorEvent)
+        }
+      }
+      
+      // Heartbeat function
+      const sendHeartbeat = () => {
+        const now = Date.now()
+        if (now - lastHeartbeat > HEARTBEAT_INTERVAL_MS && !isShuttingDown) {
+          controller.enqueue(`: heartbeat\n\n`)
+          lastHeartbeat = now
+        }
+      }
+      
+      // Set up heartbeat interval
+      const heartbeatInterval = setInterval(sendHeartbeat, 1000)
       
       try {
         // Verify job exists and belongs to user
-        const job = await getJob(jobId, userId)
+        job = await getJob(jobId, userId)
         if (!job) {
           controller.enqueue(`event: error\ndata: ${JSON.stringify({ error: 'Job not found' })}\nid: error-${Date.now()}\n\n`)
           controller.close()
@@ -49,7 +229,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         }
         
         // Check if this is a force refresh job
-        const forceRefresh = job.error_message === 'FORCE_REFRESH'
+        forceRefresh = job.error_message === 'FORCE_REFRESH'
         
         // Send initial connection event
         controller.enqueue(`event: stream_connected\ndata: ${JSON.stringify({ jobId, url: job.url })}\nid: connected-${Date.now()}\n\n`)
@@ -57,191 +237,75 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         // Store connection event in database
         await storeSSEEvent(jobId, 'stream_connected', { jobId, url: job.url })
         
-        // Start with the initial URL
-        urlQueue.push({ url: job.url, depth: 0 })
+        // Start processing the initial URL
+        queue.add(() => processUrl(job.url, 0))
         
-        // Main orchestration loop
+        // Monitor queue until completion or timeout
         while (Date.now() - startTime < TIMEOUT_MS) {
-          // Send heartbeat if needed
-          const now = Date.now()
-          if (now - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
-            controller.enqueue(`: heartbeat\n\n`)
-            lastHeartbeat = now
-          }
-          
-          // Collect URLs to crawl in this batch
-          const batch: { url: string; depth: number }[] = []
-          
-          while (urlQueue.length > 0 && batch.length < MAX_CONCURRENT_CRAWLS && processingUrls.size < MAX_CONCURRENT_CRAWLS) {
-            const item = urlQueue.shift()!
+          // Check if queue is empty and no pending tasks
+          if (queue.size === 0 && queue.pending === 0) {
+            // Wait a bit to ensure no more URLs are being added
+            await new Promise(resolve => setTimeout(resolve, 1000))
             
-            // Skip if already processed or processing
-            if (processedUrls.has(item.url) || processingUrls.has(item.url)) {
-              continue
+            // Double-check queue is still empty
+            if (queue.size === 0 && queue.pending === 0) {
+              // We're done!
+              break
             }
-            
-            processingUrls.add(item.url)
-            batch.push(item)
-          }
-          
-          // If we have URLs to crawl, process them
-          if (batch.length > 0) {
-            try {
-              // Call crawler with batch
-              const response = await fetch(
-                `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/v4/crawl`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    jobId, 
-                    urls: batch.map(item => ({
-                      url: item.url,
-                      depth: item.depth
-                    })),
-                    originalJobUrl: job.url,
-                    forceRefresh
-                  }),
-                  signal: AbortSignal.timeout(30000) // 30s timeout
-                }
-              )
-              
-              if (!response.ok) {
-                console.error('Crawler failed:', response.status)
-                // Mark URLs as processed anyway to avoid infinite loop
-                batch.forEach(item => {
-                  processingUrls.delete(item.url)
-                  processedUrls.add(item.url)
-                })
-                continue
-              }
-              
-              const result = await response.json()
-              
-              // Process successful crawls
-              if (result.completed) {
-                for (const crawled of result.completed) {
-                  processingUrls.delete(crawled.url)
-                  processedUrls.add(crawled.url)
-                  totalProcessed++
-                  
-                  // Send progress event
-                  const progressEvent = {
-                    type: 'url_processed',
-                    url: crawled.url,
-                    success: true,
-                    discovered: crawled.discoveredUrls?.length || 0,
-                    totalProcessed,
-                    totalDiscovered
-                  }
-                  controller.enqueue(`event: progress\ndata: ${JSON.stringify(progressEvent)}\nid: progress-${Date.now()}\n\n`)
-                  await storeSSEEvent(jobId, 'progress', progressEvent)
-                  
-                  // Add discovered URLs to queue
-                  if (crawled.discoveredUrls && crawled.depth < 3) {
-                    for (const newUrl of crawled.discoveredUrls) {
-                      if (!processedUrls.has(newUrl) && !processingUrls.has(newUrl)) {
-                        urlQueue.push({ url: newUrl, depth: crawled.depth + 1 })
-                        totalDiscovered++
-                      }
-                    }
-                  }
-                }
-              }
-              
-              // Process failed crawls
-              if (result.failed) {
-                for (const failed of result.failed) {
-                  processingUrls.delete(failed.url)
-                  processedUrls.add(failed.url)
-                  
-                  const errorEvent = {
-                    type: 'url_failed',
-                    url: failed.url,
-                    error: failed.error || 'Unknown error'
-                  }
-                  controller.enqueue(`event: error\ndata: ${JSON.stringify(errorEvent)}\nid: error-${Date.now()}\n\n`)
-                  await storeSSEEvent(jobId, 'error', errorEvent)
-                }
-              }
-              
-              // Send results to processing endpoint asynchronously
-              if (result.completed && result.completed.length > 0) {
-                const processResults = result.completed.map((item: any) => ({
-                  url: item.url,
-                  content: item.content,
-                  title: item.title || item.url,
-                  quality: item.quality || { score: 0, reason: 'unknown' },
-                  wordCount: item.content ? item.content.split(/\s+/).length : 0
-                }))
-                
-                // Fire and forget - don't await
-                fetch(
-                  `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/v4/process`,
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ jobId, results: processResults })
-                  }
-                ).catch(err => console.error('Process endpoint failed:', err))
-              }
-              
-            } catch (error) {
-              console.error('Batch crawl error:', error)
-              // Mark all URLs in batch as processed to avoid infinite loop
-              batch.forEach(item => {
-                processingUrls.delete(item.url)
-                processedUrls.add(item.url)
-              })
-            }
-          }
-          
-          // Check if we're done
-          if (urlQueue.length === 0 && processingUrls.size === 0) {
-            // Determine final status based on what was processed
-            const finalStatus = totalProcessed === 0 ? 'failed' : 'completed'
-            const statusMessage = totalProcessed === 0 ? 'No URLs were successfully crawled' : undefined
-            
-            console.log(`${totalProcessed === 0 ? '❌' : '✅'} Job ${jobId} ${finalStatus} - processed ${totalProcessed} URLs`)
-            await updateJobStatus(jobId, finalStatus, statusMessage)
-            
-            const completedEvent = {
-              type: totalProcessed === 0 ? 'job_failed' : 'job_completed',
-              jobId,
-              totalProcessed,
-              totalDiscovered,
-              ...(totalProcessed === 0 && { error: 'No URLs were successfully crawled' })
-            }
-            controller.enqueue(`event: ${completedEvent.type}\ndata: ${JSON.stringify(completedEvent)}\nid: ${finalStatus}-${Date.now()}\n\n`)
-            await storeSSEEvent(jobId, completedEvent.type, completedEvent)
-            break
           }
           
           // Brief pause to prevent tight loop
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 100))
         }
         
-        // Handle timeout
-        if (Date.now() - startTime >= TIMEOUT_MS) {
-          await updateJobStatus(jobId, 'timeout', 'Job exceeded 5-minute limit')
-          const timeoutEvent = {
-            type: 'job_timeout',
-            jobId,
-            totalProcessed,
-            totalDiscovered
-          }
-          controller.enqueue(`event: job_timeout\ndata: ${JSON.stringify(timeoutEvent)}\nid: timeout-${Date.now()}\n\n`)
-          await storeSSEEvent(jobId, 'job_timeout', timeoutEvent)
+        // Mark as shutting down to prevent new URLs from being added
+        isShuttingDown = true
+        
+        // Wait for any remaining tasks to complete (with timeout)
+        const shutdownTimeout = 10000 // 10 seconds
+        const shutdownStart = Date.now()
+        while (queue.pending > 0 && Date.now() - shutdownStart < shutdownTimeout) {
+          await new Promise(resolve => setTimeout(resolve, 100))
         }
+        
+        // Clear heartbeat interval
+        clearInterval(heartbeatInterval)
+        
+        // Determine final status
+        const timedOut = Date.now() - startTime >= TIMEOUT_MS
+        const finalStatus = timedOut ? 'timeout' : (totalProcessed === 0 ? 'failed' : 'completed')
+        const statusMessage = timedOut 
+          ? 'Job exceeded 5-minute limit' 
+          : (totalProcessed === 0 ? 'No URLs were successfully crawled' : undefined)
+        
+        console.log(`${totalProcessed === 0 ? '❌' : '✅'} Job ${jobId} ${finalStatus} - processed ${totalProcessed} URLs`)
+        await updateJobStatus(jobId, finalStatus, statusMessage)
+        
+        // Send final event
+        const finalEvent = {
+          type: timedOut ? 'job_timeout' : (totalProcessed === 0 ? 'job_failed' : 'job_completed'),
+          jobId,
+          totalProcessed,
+          totalDiscovered,
+          timestamp: new Date().toISOString(),
+          ...(statusMessage && { message: statusMessage })
+        }
+        controller.enqueue(`event: ${finalEvent.type}\ndata: ${JSON.stringify(finalEvent)}\nid: ${finalStatus}-${Date.now()}\n\n`)
+        await storeSSEEvent(jobId, finalEvent.type, finalEvent)
         
       } catch (error) {
         console.error('Orchestrator error:', error)
+        clearInterval(heartbeatInterval)
+        isShuttingDown = true
+        
         const errorMessage = error instanceof Error ? error.message : 'Unknown error'
         
         await updateJobStatus(jobId, 'failed', errorMessage)
         const failedEvent = {
           type: 'job_failed',
-          error: errorMessage
+          jobId,
+          error: errorMessage,
+          timestamp: new Date().toISOString()
         }
         controller.enqueue(`event: job_failed\ndata: ${JSON.stringify(failedEvent)}\nid: failed-${Date.now()}\n\n`)
         await storeSSEEvent(jobId, 'job_failed', failedEvent)
@@ -298,7 +362,8 @@ export async function GET(
     
     // Create resumable stream context
     const streamContext = createResumableStreamContext({
-      redis: { publisher, subscriber },
+      publisher,
+      subscriber,
       waitUntil
     })
     
