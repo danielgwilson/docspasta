@@ -1,408 +1,351 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
 import { 
-  CheckCircle2, 
+  Globe, 
+  Download, 
   AlertCircle, 
-  Loader2, 
-  Copy, 
-  Check,
-  ChevronDown,
-  ChevronUp,
+  CheckCircle2, 
+  Clock,
+  Link2,
+  Loader2,
+  RefreshCw,
   Sparkles,
-  Globe,
-  FileText
+  Activity
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useIsClient } from '@/hooks/useIsClient'
-
-interface CrawlStats {
-  total: number
-  processed: number
-  discovered: number
-  fromCache: number
-  failed: number
-  depth: number
-}
-
-interface CrawlEvent {
-  type: string
-  data: any
-  timestamp: number
-}
 
 interface CrawlCardProps {
   jobId: string
   url: string
-  className?: string
   onComplete?: (jobId: string) => void
+  className?: string
 }
 
-export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCardProps) {
-  const isClient = useIsClient()
-  const [status, setStatus] = useState<'connecting' | 'processing' | 'completed' | 'error'>('connecting')
-  const [title, setTitle] = useState<string>('')
+interface CrawlStats {
+  processed: number
+  discovered: number
+  total: number
+  startTime: number
+  endTime?: number
+}
+
+type JobStatus = 'idle' | 'connecting' | 'processing' | 'completed' | 'failed' | 'timeout'
+
+export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps) {
+  const [status, setStatus] = useState<JobStatus>('connecting')
   const [stats, setStats] = useState<CrawlStats>({
-    total: 0,
     processed: 0,
     discovered: 0,
-    fromCache: 0,
-    failed: 0,
-    depth: 0,
+    total: 1,
+    startTime: Date.now()
   })
   const [error, setError] = useState<string | null>(null)
-  const [events, setEvents] = useState<CrawlEvent[]>([])
-  const [showDetails, setShowDetails] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [markdown, setMarkdown] = useState<string>('')
-  const [wordCount, setWordCount] = useState(0)
+  const [events, setEvents] = useState<string[]>([])
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
 
-  // Format URL for display
-  const formatUrl = (url: string) => {
-    try {
-      const u = new URL(url)
-      return u.hostname + (u.pathname === '/' ? '' : u.pathname)
-    } catch {
-      return url
-    }
-  }
-
-  // Copy to clipboard with animation
-  const handleCopy = useCallback(async () => {
-    if (status !== 'completed' || !markdown) return
-    
-    try {
-      await navigator.clipboard.writeText(markdown)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }, [status, markdown])
-
-  // Connect to SSE stream
   useEffect(() => {
+    if (!jobId) return
+
     let eventSource: EventSource | null = null
-    
-    // First, check if job is already completed
-    const initializeJob = async () => {
-      try {
-        const response = await fetch(`/api/v4/jobs/${jobId}`)
-        if (response.ok) {
-          const data = await response.json()
-          if (data.content) {
-            // Job is already completed
-            setStatus('completed')
-            setMarkdown(data.content)
-            setWordCount(data.wordCount || data.content.split(/\s+/).length)
-            setTitle(data.title || 'Documentation')
-            setStats(prev => ({
-              ...prev,
-              processed: data.pageCount || prev.processed,
-              total: data.pageCount || prev.total
-            }))
-            return // Don't connect to SSE if already completed
-          }
-        }
-      } catch (err) {
-        console.error('Failed to check job status:', err)
-      }
-      
-      // If not completed, connect to SSE stream
-      eventSource = new EventSource(`/api/v4/jobs/${jobId}/stream`)
-      
+    let reconnectTimer: NodeJS.Timeout | null = null
+    let reconnectAttempts = 0
+    const MAX_RECONNECT_ATTEMPTS = 3
+
+    const connect = () => {
+      // Construct stream URL
+      const streamUrl = `/api/v4/jobs/${jobId}/stream`
+      console.log(`🔗 Connecting to SSE stream: ${streamUrl}`)
+
+      eventSource = new EventSource(streamUrl)
+
       eventSource.onopen = () => {
-        console.log('SSE connection opened for job:', jobId)
+        console.log('✅ SSE connection opened')
+        setStatus('processing')
+        reconnectAttempts = 0
       }
 
-    // Handler for named events
-    const handleEvent = (eventType: string) => (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data)
-        const newEvent: CrawlEvent = { type: eventType, data: { ...data, type: eventType }, timestamp: Date.now() }
-        setEvents(prev => [...prev.slice(-20), newEvent]) // Keep last 20 events
-        
-        switch (eventType) {
-          case 'stream_connected':
-            setStatus('processing')
-            break
-            
-          case 'batch_completed':
-            setStats(prev => ({
-              ...prev,
-              processed: prev.processed + (data.completed || 0),
-              failed: prev.failed + (data.failed || 0),
-              fromCache: prev.fromCache + (data.fromCache || 0),
-            }))
-            break
-            
-          case 'urls_discovered':
-            setStats(prev => ({
-              ...prev,
-              discovered: prev.discovered + (data.count || data.discoveredUrls || 0),
-              total: Math.max(prev.total, prev.discovered + (data.count || data.discoveredUrls || 0)),
-              depth: Math.max(prev.depth, data.depth || 0),
-            }))
-            break
-            
-          case 'job_completed':
-            setStatus('completed')
-            eventSource.close()
-            if (onComplete) onComplete(jobId)
-            // Fetch the combined markdown
-            fetchCombinedMarkdown()
-            break
-            
-          case 'job_failed':
-          case 'job_timeout':
-            setStatus('error')
-            setError(data.error || 'Job failed')
-            eventSource.close()
-            break
-        }
-      } catch (err) {
-        console.error('Failed to parse SSE event:', err)
-      }
-    }
+      eventSource.onerror = (error) => {
+        console.error('❌ SSE error:', error)
+        eventSource?.close()
 
-    // Register listeners for all named events
-    eventSource.addEventListener('stream_connected', handleEvent('stream_connected'))
-    eventSource.addEventListener('batch_completed', handleEvent('batch_completed'))
-    eventSource.addEventListener('urls_discovered', handleEvent('urls_discovered'))
-    eventSource.addEventListener('job_completed', handleEvent('job_completed'))
-    eventSource.addEventListener('job_failed', handleEvent('job_failed'))
-    eventSource.addEventListener('job_timeout', handleEvent('job_timeout'))
-    eventSource.addEventListener('batch_error', handleEvent('batch_error'))
-    eventSource.addEventListener('error', handleEvent('error'))
-
-      eventSource.onerror = () => {
-        if (eventSource.readyState === EventSource.CLOSED) {
-          setStatus('error')
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && status === 'processing') {
+          reconnectAttempts++
+          console.log(`🔄 Reconnecting... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+          reconnectTimer = setTimeout(connect, 2000 * reconnectAttempts)
+        } else if (status === 'processing') {
+          setStatus('failed')
           setError('Connection lost')
         }
       }
-    }
-    
-    // Initialize the job
-    initializeJob()
 
+      // Handle specific events
+      eventSource.addEventListener('stream_connected', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('📡 Stream connected:', data)
+        setStatus('processing')
+        addEvent(`Connected to ${data.url}`)
+      })
+
+      eventSource.addEventListener('progress', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('📊 Progress:', data)
+        
+        setStats(prev => ({
+          ...prev,
+          processed: data.totalProcessed || prev.processed,
+          discovered: data.totalDiscovered || prev.discovered,
+          total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, prev.total)
+        }))
+
+        if (data.url) {
+          addEvent(`Processed: ${new URL(data.url).pathname}`)
+        }
+      })
+
+      eventSource.addEventListener('job_completed', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('✅ Job completed:', data)
+        
+        setStatus('completed')
+        setStats(prev => ({
+          ...prev,
+          endTime: Date.now(),
+          processed: data.totalProcessed || prev.processed,
+          discovered: data.totalDiscovered || prev.discovered
+        }))
+        
+        addEvent('Crawl completed successfully!')
+        eventSource?.close()
+        
+        // Generate download URL
+        setDownloadUrl(`/api/v4/jobs/${jobId}/download`)
+        
+        if (onComplete) {
+          onComplete(jobId)
+        }
+      })
+
+      eventSource.addEventListener('job_failed', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('❌ Job failed:', data)
+        
+        setStatus('failed')
+        setError(data.error || 'Job failed')
+        addEvent(`Error: ${data.error || 'Unknown error'}`)
+        eventSource?.close()
+      })
+
+      eventSource.addEventListener('job_timeout', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('⏱️ Job timeout:', data)
+        
+        setStatus('timeout')
+        setStats(prev => ({ ...prev, endTime: Date.now() }))
+        addEvent('Job timed out after 5 minutes')
+        eventSource?.close()
+      })
+
+      eventSource.addEventListener('error', (event) => {
+        const data = JSON.parse(event.data)
+        console.log('⚠️ Error event:', data)
+        addEvent(`Error: ${data.error || data.message || 'Unknown error'}`)
+      })
+    }
+
+    const addEvent = (message: string) => {
+      setEvents(prev => [...prev.slice(-4), message])
+    }
+
+    // Start connection
+    connect()
+
+    // Cleanup
     return () => {
-      if (eventSource) {
-        eventSource.close()
+      console.log('🧹 Cleaning up SSE connection')
+      eventSource?.close()
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
       }
     }
   }, [jobId, onComplete])
 
-  // Fetch combined markdown when completed
-  const fetchCombinedMarkdown = async () => {
-    try {
-      const response = await fetch(`/api/v4/jobs/${jobId}`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.content) {
-          setMarkdown(data.content)
-          setWordCount(data.content.split(/\s+/).length)
-          setTitle(data.title || 'Documentation')
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch markdown:', err)
-    }
-  }
-
-  // Calculate progress percentage
-  const progress = stats.total > 0 ? (stats.processed / stats.total) * 100 : 0
-
-  // Status icon component
-  const StatusIcon = () => {
+  const getStatusIcon = () => {
     switch (status) {
       case 'connecting':
+        return <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
       case 'processing':
-        return (
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-          >
-            <Loader2 className="w-5 h-5 text-amber-600" />
-          </motion.div>
-        )
+        return <Activity className="h-5 w-5 animate-pulse text-blue-500" />
       case 'completed':
-        return <CheckCircle2 className="w-5 h-5 text-green-600" />
-      case 'error':
-        return <AlertCircle className="w-5 h-5 text-red-600" />
+        return <CheckCircle2 className="h-5 w-5 text-green-500" />
+      case 'failed':
+        return <AlertCircle className="h-5 w-5 text-red-500" />
+      case 'timeout':
+        return <Clock className="h-5 w-5 text-orange-500" />
+      default:
+        return <Globe className="h-5 w-5 text-gray-500" />
     }
   }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={cn(
-        "relative overflow-hidden rounded-xl border transition-all duration-200",
-        status === 'completed' 
-          ? "bg-gradient-to-br from-amber-50/50 to-orange-50/50 border-amber-200 hover:border-amber-300 cursor-pointer hover:shadow-lg" 
-          : "bg-white border-gray-200",
-        status === 'error' && "border-red-200 bg-red-50/50",
-        className
-      )}
-      onClick={status === 'completed' ? handleCopy : undefined}
-    >
-      {/* Main Card Content */}
-      <div className="p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
-          {/* Left side - Title and URL */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <FileText className="w-4 h-4 text-gray-600 flex-shrink-0" />
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
-                {title || 'Crawling documentation...'}
-              </h3>
-            </div>
-            <div className="flex items-center gap-2">
-              <Globe className="w-3 h-3 text-gray-400 flex-shrink-0" />
-              <p className="text-xs sm:text-sm text-gray-600 truncate">{formatUrl(url)}</p>
-            </div>
-            
-            {/* Stats summary - only show when processing or completed */}
-            {(status === 'processing' || status === 'completed') && (
-              <div className="mt-2 sm:mt-3 flex flex-wrap items-center gap-2 sm:gap-4 text-xs text-gray-500">
-                <span>{stats.processed} pages</span>
-                {stats.fromCache > 0 && (
-                  <span className="text-amber-600">⚡ {stats.fromCache} cached</span>
-                )}
-                {wordCount > 0 && (
-                  <span className="font-medium">{wordCount.toLocaleString()} words</span>
-                )}
-              </div>
-            )}
-          </div>
+  const getStatusBadge = () => {
+    const variants = {
+      connecting: 'outline',
+      processing: 'default',
+      completed: 'success',
+      failed: 'destructive',
+      timeout: 'warning'
+    } as const
 
-          {/* Right side - Status and Copy */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <StatusIcon />
-            
-            {status === 'completed' && (
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="flex items-center gap-2"
-              >
-                <AnimatePresence mode="wait">
-                  {copied ? (
-                    <motion.div
-                      key="check"
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      className="flex items-center gap-2 text-green-600"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span className="text-xs sm:text-sm font-medium">Copied!</span>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="copy"
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      className="flex items-center gap-2 text-gray-600"
-                    >
-                      <Copy className="w-4 h-4" />
-                      <span className="text-xs sm:text-sm hidden sm:inline">Click to copy</span>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            )}
+    const labels = {
+      connecting: 'Connecting...',
+      processing: 'Crawling',
+      completed: 'Completed',
+      failed: 'Failed',
+      timeout: 'Timed Out'
+    }
+
+    return (
+      <Badge variant={variants[status] || 'outline'} className="font-medium">
+        {labels[status]}
+      </Badge>
+    )
+  }
+
+  const getDuration = () => {
+    const start = stats.startTime
+    const end = stats.endTime || Date.now()
+    const seconds = Math.floor((end - start) / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`
+    }
+    return `${seconds}s`
+  }
+
+  const progress = stats.total > 0 ? (stats.processed / stats.total) * 100 : 0
+
+  return (
+    <Card className={cn("w-full transition-all duration-300 hover:shadow-lg", className)}>
+      <CardHeader className="space-y-1">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1 flex-1 mr-4">
+            <CardTitle className="text-xl flex items-center gap-2">
+              {getStatusIcon()}
+              <span className="truncate">{new URL(url).hostname}</span>
+            </CardTitle>
+            <CardDescription className="text-sm truncate">
+              {url}
+            </CardDescription>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            {getStatusBadge()}
+            <span className="text-xs text-muted-foreground font-mono">
+              {getDuration()}
+            </span>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* Progress Section */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Progress</span>
+            <span className="font-medium">{stats.processed} / {stats.discovered || '?'} pages</span>
+          </div>
+          <Progress value={progress} className="h-2" />
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-4 py-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium flex items-center gap-1">
+              <Link2 className="h-3 w-3" />
+              Discovered
+            </p>
+            <p className="text-2xl font-bold">{stats.discovered}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              Processed
+            </p>
+            <p className="text-2xl font-bold">{stats.processed}</p>
           </div>
         </div>
 
-        {/* Progress bar - subtle and integrated */}
-        {status === 'processing' && (
-          <div className="mt-4">
-            <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-              <motion.div
-                className="h-full bg-gradient-to-r from-amber-500 to-orange-500"
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                transition={{ duration: 0.3 }}
-              />
+        {/* Activity Log */}
+        {events.length > 0 && (
+          <>
+            <Separator />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-muted-foreground mb-2">Activity</p>
+              <AnimatePresence mode="popLayout">
+                {events.map((event, index) => (
+                  <motion.div
+                    key={`${event}-${index}`}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="text-xs text-muted-foreground flex items-center gap-1"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    {event}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
+          </>
+        )}
+
+        {/* Error Display */}
+        {error && (
+          <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
+            <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              {error}
+            </p>
           </div>
         )}
 
-        {/* Error message */}
-        {status === 'error' && error && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="mt-3 text-sm text-red-600"
-          >
-            {error}
-          </motion.div>
+        {/* Action Buttons */}
+        {status === 'completed' && downloadUrl && (
+          <div className="pt-2 flex gap-2">
+            <Button 
+              variant="default" 
+              size="sm" 
+              className="flex-1"
+              onClick={() => window.open(downloadUrl, '_blank')}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download Markdown
+            </Button>
+          </div>
         )}
 
-        {/* Expandable details */}
-        {events.length > 0 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowDetails(!showDetails)
-            }}
-            className="mt-3 flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+        {(status === 'failed' || status === 'timeout') && (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="w-full"
+            onClick={() => window.location.reload()}
           >
-            {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {showDetails ? 'Hide' : 'Show'} details
-          </button>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
         )}
-      </div>
-
-      {/* Expandable event details */}
-      <AnimatePresence>
-        {showDetails && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="border-t border-gray-100 bg-gray-50/50 px-4 sm:px-6 py-2 sm:py-3 overflow-hidden"
-          >
-            <div className="max-h-32 overflow-y-auto">
-              <div className="space-y-1">
-                {events.slice(-5).reverse().map((event, i) => (
-                  <div key={i} className="text-xs text-gray-600">
-                    <span className="font-mono text-gray-400 text-[10px] sm:text-xs">
-                      {isClient ? new Date(event.timestamp).toLocaleTimeString() : '00:00:00'}
-                    </span>
-                    {' '}
-                    <span className="font-medium text-[11px] sm:text-xs">{event.type.replace(/_/g, ' ')}</span>
-                    {event.data.count && ` (${event.data.count})`}
-                    {event.data.completed && ` (${event.data.completed} done)`}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Sparkle effect on completion */}
-      {status === 'completed' && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="absolute -top-1 -right-1"
-        >
-          <Sparkles className="w-4 h-4 text-amber-500" />
-        </motion.div>
-      )}
-    </motion.div>
+      </CardContent>
+    </Card>
   )
 }
 
-// Export both as default and named export
-export { CrawlCard }
+export default CrawlCard

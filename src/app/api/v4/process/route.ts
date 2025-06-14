@@ -5,9 +5,11 @@ import {
 } from '@/lib/serverless/db-operations'
 import { publishEvent } from '@/lib/serverless/redis-stream'
 import { combineToMarkdown } from '@/lib/serverless/quality'
+import { getUserId } from '@/lib/serverless/auth'
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getUserId(request)
     const { jobId, results } = await request.json()
     
     if (!jobId || !results || !Array.isArray(results)) {
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
     console.log(`🔄 Processing ${results.length} results for job ${jobId}`)
     
     // Store the results
-    await storeJobResults(jobId, results)
+    await storeJobResults(userId, jobId, results)
     
     // Filter high-quality content (score >= 20)
     const goodContent = results.filter(r => r.quality?.score >= 20)
@@ -31,14 +33,14 @@ export async function POST(request: NextRequest) {
       
       // Update job metrics
       const totalWords = goodContent.reduce((sum, r) => sum + r.wordCount, 0)
-      await updateJobMetrics(jobId, {
+      await updateJobMetrics(userId, jobId, {
         pages_processed: results.length,
         total_words: totalWords,
         final_markdown: markdown
       })
       
       // Publish progress event
-      await publishEvent(jobId, {
+      await publishEvent(userId, jobId, {
         type: 'content_processed',
         pages: goodContent.length,
         totalWords,
@@ -48,7 +50,7 @@ export async function POST(request: NextRequest) {
       console.log(`✅ Processed ${goodContent.length} quality pages (${totalWords} words)`)
     } else {
       // No quality content found
-      await publishEvent(jobId, {
+      await publishEvent(userId, jobId, {
         type: 'content_processed',
         pages: 0,
         totalWords: 0,

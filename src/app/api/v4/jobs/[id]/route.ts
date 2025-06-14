@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCombinedMarkdown } from '@/lib/serverless/db-operations'
+import { getUserId } from '@/lib/serverless/auth'
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await getUserId(request)
     const { id: jobId } = await params
     
     // Get combined markdown for the job
-    const result = await getCombinedMarkdown(jobId)
+    const result = await getCombinedMarkdown(userId, jobId)
     
     if (!result) {
       return NextResponse.json({

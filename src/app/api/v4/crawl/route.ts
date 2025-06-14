@@ -8,10 +8,12 @@ import {
 } from '@/lib/serverless/db-operations'
 import { extractValidLinks } from '@/lib/serverless/url-utils'
 import { assessContentQuality } from '@/lib/serverless/quality'
+import { getUserId } from '@/lib/serverless/auth'
 
 export async function POST(request: NextRequest) {
   try {
-    const { jobId, urls, originalJobUrl } = await request.json()
+    const userId = await getUserId(request)
+    const { jobId, urls, originalJobUrl, forceRefresh = false } = await request.json()
     
     if (!jobId || !urls || !Array.isArray(urls)) {
       return NextResponse.json({
@@ -28,23 +30,29 @@ export async function POST(request: NextRequest) {
         const { id: urlId, url, depth } = urlData
         
         try {
-          // Check cache first
-          const cached = await getCachedContent(url)
+          // Check cache first (unless force refresh is enabled)
+          const cached = !forceRefresh ? await getCachedContent(userId, url) : null
           if (cached) {
             console.log(`📦 Cache hit: ${url}`)
             
-            // Mark URL as completed
-            await markUrlCompleted(urlId)
+            // Mark URL as completed (only if it's a valid database ID)
+            if (urlId && urlId.length > 16) {
+              await markUrlCompleted(urlId).catch(() => {
+                // Ignore errors for non-database IDs
+              })
+            }
             
             return {
               url,
               title: cached.title,
               content: cached.content,
               links: cached.links,
+              discoveredUrls: cached.links, // Include links as discovered URLs
               quality: { score: cached.quality_score },
               wordCount: cached.word_count,
               success: true,
-              fromCache: true
+              fromCache: true,
+              depth: depth
             }
           }
           
@@ -61,7 +69,7 @@ export async function POST(request: NextRequest) {
             const validLinks = extractValidLinks(result.links || [], url, originalJobUrl)
             
             // Cache the content
-            await cacheContent(url, {
+            await cacheContent(userId, url, {
               title: result.title || 'Untitled',
               content: result.content,
               links: validLinks,
@@ -69,22 +77,30 @@ export async function POST(request: NextRequest) {
               word_count: wordCount
             })
             
-            // Mark URL as completed
-            await markUrlCompleted(urlId)
+            // Mark URL as completed (only if it's a valid database ID)
+            if (urlId && urlId.length > 16) {
+              await markUrlCompleted(urlId).catch(() => {
+                // Ignore errors for non-database IDs
+              })
+            }
             
             return {
               url,
               title: result.title,
               content: result.content,
               links: validLinks,
+              discoveredUrls: validLinks, // Include links as discovered URLs
               quality,
               wordCount,
               success: true,
-              fromCache: false
+              fromCache: false,
+              depth: depth
             }
           } else {
             // Mark URL as failed
             await markUrlFailed(urlId)
+            
+            console.error(`❌ Crawl failed for ${url}:`, result.error || 'No content returned')
             
             return { 
               url, 
@@ -93,8 +109,12 @@ export async function POST(request: NextRequest) {
             }
           }
         } catch (error) {
-          // Mark URL as failed
-          await markUrlFailed(urlId)
+          // Mark URL as failed (only if it's a valid database ID)
+          if (urlId && urlId.length > 16) {
+            await markUrlFailed(urlId).catch(() => {
+              // Ignore errors for non-database IDs
+            })
+          }
           
           return {
             url,
@@ -127,13 +147,17 @@ export async function POST(request: NextRequest) {
         }
       })
     
-    // Extract discovered URLs (only from fresh crawls)
+    // Extract discovered URLs from all results (both cached and fresh)
     const discoveredUrls = completed
-      .filter(result => !result.fromCache)
-      .flatMap(result => result.links || [])
+      .flatMap(result => result.discoveredUrls || result.links || [])
       .filter((url, index, self) => self.indexOf(url) === index) // Dedupe
     
     console.log(`✅ Crawl complete: ${completed.length} success, ${failed.length} failed`)
+    
+    // Log failures for debugging
+    if (failed.length > 0) {
+      console.log('Failed URLs:', failed)
+    }
     
     return NextResponse.json({
       success: true,

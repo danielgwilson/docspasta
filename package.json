@@ -14,12 +14,16 @@
     "test:e2e:run": "vitest run --config vitest.e2e.config.ts",
     "db:generate": "drizzle-kit generate --dialect=postgresql --schema=./src/lib/db/schema.ts --out=./drizzle/migrations",
     "db:migrate": "tsx ./src/lib/db/migrate.ts",
+    "db:migrate:v4-user": "tsx ./src/lib/db/migrate-v4-user-isolation.ts",
     "db:reset": "tsx ./src/lib/db/reset.ts",
     "db:nuclear": "tsx ./scripts/nuclear-reset.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:migrate-v4": "tsx ./scripts/migrate-to-v4.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",
+    "@radix-ui/react-checkbox": "^1.3.2",
+    "@radix-ui/react-separator": "^1.1.7",
     "@radix-ui/react-slot": "^1.2.3",
     "@types/jsdom": "^21.1.7",
     "@types/uuid": "^10.0.0",
