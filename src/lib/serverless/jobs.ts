@@ -20,12 +20,19 @@ export class JobManager {
     const validated = CreateJobSchema.parse(request)
     
     const result = await this.sql`
-      INSERT INTO crawl_jobs_v3 (initial_url, max_pages, max_depth, quality_threshold)
-      VALUES (${validated.url}, ${validated.maxPages}, ${validated.maxDepth}, ${validated.qualityThreshold})
+      INSERT INTO jobs (url, status)
+      VALUES (${validated.url}, 'running')
       RETURNING id
     `
     
     const jobId = result[0].id
+    
+    // Store job config in KV for the worker
+    await kv.hset(`job:${jobId}:config`, {
+      maxPages: validated.maxPages,
+      maxDepth: validated.maxDepth,
+      qualityThreshold: validated.qualityThreshold
+    })
     
     // Add to pending jobs queue (Vercel KV)
     await kv.sadd('pending_jobs', jobId)
@@ -36,33 +43,36 @@ export class JobManager {
   
   async getJobState(jobId: string): Promise<JobState | null> {
     const result = await this.sql`
-      SELECT id, status, current_step, total_urls, processed_urls, failed_urls, 
-             discovered_urls, EXTRACT(EPOCH FROM created_at) as created_at,
-             EXTRACT(EPOCH FROM updated_at) as updated_at,
-             EXTRACT(EPOCH FROM started_at) as started_at,
+      SELECT id, status, url, 
+             EXTRACT(EPOCH FROM created_at) as created_at,
              EXTRACT(EPOCH FROM completed_at) as completed_at,
-             error_details, results, final_markdown
-      FROM crawl_jobs_v3 
+             error_message, final_markdown,
+             pages_found, pages_processed, total_words
+      FROM jobs 
       WHERE id = ${jobId}
     `
     
     if (result.length === 0) return null
     
     const row = result[0]
+    
+    // Get current step from KV
+    const kvData = await kv.hgetall(`job:${jobId}:state`) || {}
+    
     return {
       id: row.id,
       status: row.status,
-      currentStep: row.current_step,
-      totalUrls: row.total_urls || 0,
-      processedUrls: row.processed_urls || 0,
-      failedUrls: row.failed_urls || 0,
-      discoveredUrls: row.discovered_urls || 0,
+      currentStep: kvData.currentStep || 'init',
+      totalUrls: kvData.totalUrls || 0,
+      processedUrls: row.pages_processed || 0,
+      failedUrls: kvData.failedUrls || 0,
+      discoveredUrls: row.pages_found || 0,
       createdAt: row.created_at * 1000, // Convert to milliseconds
-      updatedAt: row.updated_at * 1000,
-      startedAt: row.started_at ? row.started_at * 1000 : undefined,
+      updatedAt: Date.now(), // V4 doesn't track updated_at
+      startedAt: row.created_at * 1000, // Use created_at as started_at
       completedAt: row.completed_at ? row.completed_at * 1000 : undefined,
-      errorDetails: row.error_details,
-      results: row.results,
+      errorDetails: row.error_message ? { message: row.error_message } : undefined,
+      results: kvData.results || [],
       finalMarkdown: row.final_markdown,
     }
   }
@@ -70,72 +80,82 @@ export class JobManager {
   async updateJobState(jobId: string, updates: Partial<JobState>): Promise<void> {
     if (Object.keys(updates).length === 0) return
     
-    // Build query manually for now (simplified approach)
-    let query = `UPDATE crawl_jobs_v3 SET updated_at = NOW()`
-    const queryValues: any[] = []
-    let paramIndex = 1
-    
+    // Update database fields that exist in V4
     if (updates.status) {
-      query += `, status = $${paramIndex}`
-      queryValues.push(updates.status)
-      paramIndex++
-    }
-    
-    if (updates.currentStep) {
-      query += `, current_step = $${paramIndex}`
-      queryValues.push(updates.currentStep)
-      paramIndex++
-    }
-    
-    if (updates.totalUrls !== undefined) {
-      query += `, total_urls = $${paramIndex}`
-      queryValues.push(updates.totalUrls)
-      paramIndex++
+      if (updates.status === 'completed' || updates.status === 'failed') {
+        await this.sql`
+          UPDATE jobs 
+          SET status = ${updates.status},
+              completed_at = NOW(),
+              error_message = ${updates.errorDetails?.message || null}
+          WHERE id = ${jobId}
+        `
+      } else {
+        await this.sql`
+          UPDATE jobs 
+          SET status = ${updates.status},
+              error_message = ${updates.errorDetails?.message || null}
+          WHERE id = ${jobId}
+        `
+      }
     }
     
     if (updates.processedUrls !== undefined) {
-      query += `, processed_urls = $${paramIndex}`
-      queryValues.push(updates.processedUrls)
-      paramIndex++
-    }
-    
-    if (updates.failedUrls !== undefined) {
-      query += `, failed_urls = $${paramIndex}`
-      queryValues.push(updates.failedUrls)
-      paramIndex++
+      await this.sql`
+        UPDATE jobs 
+        SET pages_processed = ${updates.processedUrls}
+        WHERE id = ${jobId}
+      `
     }
     
     if (updates.discoveredUrls !== undefined) {
-      query += `, discovered_urls = $${paramIndex}`
-      queryValues.push(updates.discoveredUrls)
-      paramIndex++
+      await this.sql`
+        UPDATE jobs 
+        SET pages_found = ${updates.discoveredUrls}
+        WHERE id = ${jobId}
+      `
     }
     
-    query += ` WHERE id = $${paramIndex}`
-    queryValues.push(jobId)
+    if (updates.finalMarkdown) {
+      await this.sql`
+        UPDATE jobs 
+        SET final_markdown = ${updates.finalMarkdown},
+            total_words = ${updates.finalMarkdown.split(/\s+/).length}
+        WHERE id = ${jobId}
+      `
+    }
     
-    // Execute with manual query
-    const sql = this.sql
-    await sql.unsafe(query)
+    // Store state that doesn't exist in V4 schema in KV
+    const kvUpdates: Record<string, any> = {}
+    if (updates.currentStep) kvUpdates.currentStep = updates.currentStep
+    if (updates.totalUrls !== undefined) kvUpdates.totalUrls = updates.totalUrls
+    if (updates.failedUrls !== undefined) kvUpdates.failedUrls = updates.failedUrls
+    if (updates.results) kvUpdates.results = updates.results
+    
+    if (Object.keys(kvUpdates).length > 0) {
+      await kv.hset(`job:${jobId}:state`, kvUpdates)
+    }
     
     console.log(`📊 Updated job ${jobId} state:`, Object.keys(updates).join(', '))
   }
   
   async getJobConfiguration(jobId: string) {
     const result = await this.sql`
-      SELECT initial_url, max_pages, max_depth, quality_threshold
-      FROM crawl_jobs_v3 
+      SELECT url
+      FROM jobs 
       WHERE id = ${jobId}
     `
     
     if (result.length === 0) return null
     
-    const row = result[0]
+    // Get config from KV
+    const config = await kv.hgetall(`job:${jobId}:config`) || {}
+    
     return {
-      url: row.initial_url,
-      maxPages: row.max_pages,
-      maxDepth: row.max_depth,
-      qualityThreshold: row.quality_threshold,
+      url: result[0].url,
+      maxPages: config.maxPages || 50,
+      maxDepth: config.maxDepth || 2,
+      qualityThreshold: config.qualityThreshold || 20,
     }
   }
 }

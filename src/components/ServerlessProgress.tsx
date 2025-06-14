@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { FileText, Zap, XCircle } from 'lucide-react'
+import { useIsClient } from '@/hooks/useIsClient'
 import type { ProgressEvent } from '@/lib/serverless/types'
 
 export default function ServerlessProgress() {
+  const isClient = useIsClient()
   const [inputUrl, setInputUrl] = useState('')
   const { jobId, url, isLoading, error, events, startCrawl, stopCrawl } = useServerlessCrawl()
   
@@ -188,7 +190,7 @@ export default function ServerlessProgress() {
                 {events.filter(event => event && event.type).map((event, index) => (
                   <div key={index} className="flex items-start gap-2 py-1 border-b border-gray-100 dark:border-gray-800 last:border-0">
                     <span className="text-gray-500 text-xs tabular-nums">
-                      {event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : 'Now'}
+                      {isClient && event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : 'Now'}
                     </span>
                     <div className="flex-1">
                       <span className={`font-medium ${

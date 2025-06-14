@@ -1,14 +1,15 @@
-'use client';
+'use client'
 
-import { useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Sparkles } from 'lucide-react';
-import ServerlessProgressV2 from '@/components/ServerlessProgressV2';
+import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { Sparkles } from 'lucide-react'
+import ServerlessProgressV2 from '@/components/ServerlessProgressV2'
 
 export default function Home() {
   // Initialize dev processor in development
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
+    // Only run on client side
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
       fetch('/api/init').catch(console.error)
     }
   }, [])
@@ -17,18 +18,18 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-100 dark:from-amber-950 dark:via-orange-950 dark:to-yellow-900">
       {/* Header */}
       <header className="border-b border-amber-200/20 bg-white/10 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="text-2xl">🍝</div>
-            <span className="text-xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+            <div className="text-xl sm:text-2xl">🍝</div>
+            <span className="text-lg sm:text-xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
               Docspasta
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Button variant="ghost" size="sm" className="px-3 sm:px-4">
               Sign In
             </Button>
-            <Button size="sm" className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700">
+            <Button size="sm" className="px-3 sm:px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700">
               Sign Up
             </Button>
           </div>

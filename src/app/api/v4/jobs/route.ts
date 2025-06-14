@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createJob, addUrlsToQueue } from '@/lib/serverless/db-operations'
+import { createJob, addUrlsToQueue, getActiveJobs } from '@/lib/serverless/db-operations'
 import { isValidCrawlUrl } from '@/lib/serverless/url-utils'
+
+export async function GET() {
+  try {
+    const jobs = await getActiveJobs()
+    
+    return NextResponse.json({
+      success: true,
+      data: jobs
+    })
+  } catch (error) {
+    console.error('Failed to get active jobs:', error)
+    
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {

@@ -22,6 +22,27 @@ export async function getJob(jobId: string) {
   return result[0] || null
 }
 
+export async function getActiveJobs() {
+  const result = await sql`
+    SELECT id, url, status, created_at, pages_processed, pages_found
+    FROM jobs
+    WHERE status = 'running'
+    ORDER BY created_at DESC
+    LIMIT 20
+  `
+  return result
+}
+
+export async function getRecentJobs(limit: number = 10) {
+  const result = await sql`
+    SELECT id, url, status, created_at, completed_at, pages_processed, pages_found, total_words
+    FROM jobs
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `
+  return result
+}
+
 export async function updateJobStatus(jobId: string, status: string, error?: string) {
   await sql`
     UPDATE jobs 

@@ -15,6 +15,7 @@ import {
   FileText
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useIsClient } from '@/hooks/useIsClient'
 
 interface CrawlStats {
   total: number
@@ -39,6 +40,7 @@ interface CrawlCardProps {
 }
 
 export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCardProps) {
+  const isClient = useIsClient()
   const [status, setStatus] = useState<'connecting' | 'processing' | 'completed' | 'error'>('connecting')
   const [title, setTitle] = useState<string>('')
   const [stats, setStats] = useState<CrawlStats>({
@@ -81,11 +83,38 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
 
   // Connect to SSE stream
   useEffect(() => {
-    const eventSource = new EventSource(`/api/v4/jobs/${jobId}/stream`)
+    let eventSource: EventSource | null = null
     
-    eventSource.onopen = () => {
-      console.log('SSE connection opened for job:', jobId)
-    }
+    // First, check if job is already completed
+    const initializeJob = async () => {
+      try {
+        const response = await fetch(`/api/v4/jobs/${jobId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.content) {
+            // Job is already completed
+            setStatus('completed')
+            setMarkdown(data.content)
+            setWordCount(data.wordCount || data.content.split(/\s+/).length)
+            setTitle(data.title || 'Documentation')
+            setStats(prev => ({
+              ...prev,
+              processed: data.pageCount || prev.processed,
+              total: data.pageCount || prev.total
+            }))
+            return // Don't connect to SSE if already completed
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check job status:', err)
+      }
+      
+      // If not completed, connect to SSE stream
+      eventSource = new EventSource(`/api/v4/jobs/${jobId}/stream`)
+      
+      eventSource.onopen = () => {
+        console.log('SSE connection opened for job:', jobId)
+      }
 
     // Handler for named events
     const handleEvent = (eventType: string) => (event: MessageEvent) => {
@@ -147,15 +176,21 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
     eventSource.addEventListener('batch_error', handleEvent('batch_error'))
     eventSource.addEventListener('error', handleEvent('error'))
 
-    eventSource.onerror = () => {
-      if (eventSource.readyState === EventSource.CLOSED) {
-        setStatus('error')
-        setError('Connection lost')
+      eventSource.onerror = () => {
+        if (eventSource.readyState === EventSource.CLOSED) {
+          setStatus('error')
+          setError('Connection lost')
+        }
       }
     }
+    
+    // Initialize the job
+    initializeJob()
 
     return () => {
-      eventSource.close()
+      if (eventSource) {
+        eventSource.close()
+      }
     }
   }, [jobId, onComplete])
 
@@ -215,24 +250,24 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
       onClick={status === 'completed' ? handleCopy : undefined}
     >
       {/* Main Card Content */}
-      <div className="p-6">
-        <div className="flex items-start justify-between gap-4">
+      <div className="p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
           {/* Left side - Title and URL */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <FileText className="w-4 h-4 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900 truncate">
+              <FileText className="w-4 h-4 text-gray-600 flex-shrink-0" />
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">
                 {title || 'Crawling documentation...'}
               </h3>
             </div>
             <div className="flex items-center gap-2">
-              <Globe className="w-3 h-3 text-gray-400" />
-              <p className="text-sm text-gray-600 truncate">{formatUrl(url)}</p>
+              <Globe className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              <p className="text-xs sm:text-sm text-gray-600 truncate">{formatUrl(url)}</p>
             </div>
             
             {/* Stats summary - only show when processing or completed */}
             {(status === 'processing' || status === 'completed') && (
-              <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
+              <div className="mt-2 sm:mt-3 flex flex-wrap items-center gap-2 sm:gap-4 text-xs text-gray-500">
                 <span>{stats.processed} pages</span>
                 {stats.fromCache > 0 && (
                   <span className="text-amber-600">⚡ {stats.fromCache} cached</span>
@@ -245,7 +280,7 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
           </div>
 
           {/* Right side - Status and Copy */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <StatusIcon />
             
             {status === 'completed' && (
@@ -265,7 +300,7 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
                       className="flex items-center gap-2 text-green-600"
                     >
                       <Check className="w-4 h-4" />
-                      <span className="text-sm font-medium">Copied!</span>
+                      <span className="text-xs sm:text-sm font-medium">Copied!</span>
                     </motion.div>
                   ) : (
                     <motion.div
@@ -276,7 +311,7 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
                       className="flex items-center gap-2 text-gray-600"
                     >
                       <Copy className="w-4 h-4" />
-                      <span className="text-sm">Click to copy</span>
+                      <span className="text-xs sm:text-sm hidden sm:inline">Click to copy</span>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -333,17 +368,17 @@ export default function CrawlCard({ jobId, url, className, onComplete }: CrawlCa
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="border-t border-gray-100 bg-gray-50/50 px-6 py-3 overflow-hidden"
+            className="border-t border-gray-100 bg-gray-50/50 px-4 sm:px-6 py-2 sm:py-3 overflow-hidden"
           >
             <div className="max-h-32 overflow-y-auto">
               <div className="space-y-1">
                 {events.slice(-5).reverse().map((event, i) => (
                   <div key={i} className="text-xs text-gray-600">
-                    <span className="font-mono text-gray-400">
-                      {new Date(event.timestamp).toLocaleTimeString()}
+                    <span className="font-mono text-gray-400 text-[10px] sm:text-xs">
+                      {isClient ? new Date(event.timestamp).toLocaleTimeString() : '00:00:00'}
                     </span>
                     {' '}
-                    <span className="font-medium">{event.type.replace(/_/g, ' ')}</span>
+                    <span className="font-medium text-[11px] sm:text-xs">{event.type.replace(/_/g, ' ')}</span>
                     {event.data.count && ` (${event.data.count})`}
                     {event.data.completed && ` (${event.data.completed} done)`}
                   </div>

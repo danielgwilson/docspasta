@@ -1,6 +1,7 @@
 import { kv } from '@vercel/kv'
 import { neon } from '@neondatabase/serverless'
 import type { QueueItem } from './types'
+import { createUrlHash, normalizeUrl } from './url-utils'
 
 export class QueueManager {
   private sql = neon(process.env.DATABASE_URL_UNPOOLED!)
@@ -10,10 +11,18 @@ export class QueueManager {
     
     // Batch insert URLs to PostgreSQL using Neon's approach
     for (const url of urls) {
-      await this.sql`
-        INSERT INTO job_urls_v3 (job_id, url, discovered_from, depth)
-        VALUES (${jobId}, ${url}, ${discoveredFrom || null}, 0)
-      `
+      const normalized = normalizeUrl(url)
+      const hash = createUrlHash(normalized)
+      
+      try {
+        await this.sql`
+          INSERT INTO job_queue (job_id, url_hash, url, depth)
+          VALUES (${jobId}, ${hash}, ${normalized}, 0)
+          ON CONFLICT (job_id, url_hash) DO NOTHING
+        `
+      } catch (error) {
+        console.error(`Failed to add URL ${normalized}:`, error)
+      }
     }
     
     // Add jobId to active processing queue (Vercel KV)
@@ -37,7 +46,7 @@ export class QueueManager {
       const remainingBatchSize = Math.min(3, batchSize - results.length)
       
       const urls = await this.sql`
-        SELECT id, url FROM job_urls_v3 
+        SELECT id, url FROM job_queue 
         WHERE job_id = ${jobId} AND status = 'pending'
         ORDER BY created_at
         LIMIT ${remainingBatchSize}
@@ -61,24 +70,24 @@ export class QueueManager {
   
   async markUrlProcessing(urlId: string): Promise<void> {
     await this.sql`
-      UPDATE job_urls_v3 
-      SET status = 'processing', processing_started_at = NOW(), last_attempt_at = NOW()
+      UPDATE job_queue 
+      SET status = 'processing'
       WHERE id = ${urlId}
     `
   }
   
   async markUrlCompleted(urlId: string, result: any): Promise<void> {
     await this.sql`
-      UPDATE job_urls_v3 
-      SET status = 'completed', result = ${JSON.stringify(result)}
+      UPDATE job_queue 
+      SET status = 'completed'
       WHERE id = ${urlId}
     `
   }
   
   async markUrlFailed(urlId: string, error: string): Promise<void> {
     await this.sql`
-      UPDATE job_urls_v3 
-      SET status = 'failed', error_message = ${error}, retry_count = retry_count + 1
+      UPDATE job_queue 
+      SET status = 'failed'
       WHERE id = ${urlId}
     `
   }
@@ -91,7 +100,7 @@ export class QueueManager {
         COUNT(*) FILTER (WHERE status = 'failed') as failed,
         COUNT(*) FILTER (WHERE status = 'pending') as pending,
         COUNT(*) FILTER (WHERE status = 'processing') as processing
-      FROM job_urls_v3 
+      FROM job_queue 
       WHERE job_id = ${jobId}
     `
     
@@ -127,7 +136,7 @@ export class QueueManager {
         COUNT(*) FILTER (WHERE status = 'failed') as failed,
         COUNT(*) FILTER (WHERE status = 'pending') as pending,
         COUNT(*) FILTER (WHERE status = 'processing') as processing
-      FROM job_urls_v3 
+      FROM job_queue 
       WHERE job_id = ${jobId}
     `
     
