@@ -91,26 +91,27 @@ export async function updateJobMetrics(jobId: string, metrics: {
 }
 
 // SSE event operations
-export async function storeSSEEvent(jobId: string, eventType: string, eventData: any) {
+export async function storeSSEEvent(jobId: string, userId: string, eventType: string, eventData: any) {
   const eventId = `${jobId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   
   await sql`
-    INSERT INTO sse_events (job_id, event_id, event_type, event_data)
-    VALUES (${jobId}, ${eventId}, ${eventType}, ${JSON.stringify(eventData)})
+    INSERT INTO sse_events (job_id, user_id, event_id, event_type, event_data)
+    VALUES (${jobId}, ${userId}, ${eventId}, ${eventType}, ${JSON.stringify(eventData)})
   `
   
   return eventId
 }
 
-export async function getSSEEvents(jobId: string, afterEventId?: string) {
+export async function getSSEEvents(jobId: string, userId: string, afterEventId?: string) {
   if (afterEventId) {
     const result = await sql`
       SELECT event_id, event_type, event_data, created_at
       FROM sse_events
       WHERE job_id = ${jobId}
+        AND user_id = ${userId}
         AND created_at > (
           SELECT created_at FROM sse_events 
-          WHERE job_id = ${jobId} AND event_id = ${afterEventId}
+          WHERE job_id = ${jobId} AND user_id = ${userId} AND event_id = ${afterEventId}
         )
       ORDER BY created_at ASC
       LIMIT 100
@@ -121,6 +122,7 @@ export async function getSSEEvents(jobId: string, afterEventId?: string) {
       SELECT event_id, event_type, event_data, created_at
       FROM sse_events
       WHERE job_id = ${jobId}
+        AND user_id = ${userId}
       ORDER BY created_at ASC
       LIMIT 100
     `

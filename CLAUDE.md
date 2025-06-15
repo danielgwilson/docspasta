@@ -14,6 +14,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Current Status**: Phase 3 complete (core infrastructure, APIs, frontend). Now implementing critical optimizations: PostgreSQL SKIP LOCKED queues, fan-out processing, and Vercel KV adapters.
 
+## Kit MCP for Code Navigation
+
+**IMPORTANT**: Always use the Kit MCP tool (`mcp__kit__*`) for code navigation and analysis. Kit provides:
+- `open_repository`: Open and index a repository for fast searching
+- `search_code`: Search for code patterns across the entire codebase
+- `get_file_content`: Read multiple files efficiently
+- `extract_symbols`: Find function/class definitions
+- `find_symbol_usages`: Track where symbols are used
+- `get_file_tree`: Understand project structure
+
+Use Kit instead of manual file navigation for better performance and comprehensive code understanding.
+
 ## Gemini Collaboration Policy
 
 **CRITICAL**: **Always collaborate with Gemini MCP at major decision points and implementation steps**. Use `mcp__gemini__thinkdeep` for:

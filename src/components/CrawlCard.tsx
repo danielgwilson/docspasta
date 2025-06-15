@@ -29,6 +29,12 @@ interface CrawlCardProps {
   onComplete?: (jobId: string) => void
   onDismiss?: (jobId: string) => void
   className?: string
+  // Optional initial state to skip fetching
+  initialStatus?: string
+  initialProcessed?: number
+  initialDiscovered?: number
+  initialLastEventId?: string | null
+  initialError?: string | null
 }
 
 interface CrawlStats {
@@ -41,24 +47,148 @@ interface CrawlStats {
 
 type JobStatus = 'idle' | 'connecting' | 'processing' | 'completed' | 'failed' | 'timeout'
 
-export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: CrawlCardProps) {
-  const [status, setStatus] = useState<JobStatus>('connecting')
+export function CrawlCard({ 
+  jobId, 
+  url, 
+  onComplete, 
+  onDismiss, 
+  className,
+  initialStatus,
+  initialProcessed,
+  initialDiscovered,
+  initialLastEventId,
+  initialError
+}: CrawlCardProps) {
+  // Use initial values if provided
+  const [status, setStatus] = useState<JobStatus>(
+    initialStatus === 'completed' ? 'completed' :
+    initialStatus === 'failed' ? 'failed' :
+    initialStatus === 'timeout' ? 'timeout' :
+    'connecting'
+  )
   const [stats, setStats] = useState<CrawlStats>({
-    processed: 0,
-    discovered: 0,
-    total: 1,
+    processed: initialProcessed || 0,
+    discovered: initialDiscovered || 0,
+    total: Math.max(initialDiscovered || 0, initialProcessed || 0, 1),
     startTime: Date.now()
   })
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError || null)
   const [events, setEvents] = useState<string[]>([])
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(
+    initialStatus === 'completed' ? `/api/v4/jobs/${jobId}/download` : null
+  )
+  const [isRestoring, setIsRestoring] = useState(!initialStatus) // Skip restore if we have initial state
+  const [lastEventId, setLastEventId] = useState<string | null>(initialLastEventId || null)
   
   // Use ref to access current status value in closures
   const statusRef = useRef(status)
   statusRef.current = status
+  
+  // Use ref to track lastEventId in closures
+  const lastEventIdRef = useRef(lastEventId)
+  lastEventIdRef.current = lastEventId
 
+  // Handle initial state or fetch job state on mount
   useEffect(() => {
     if (!jobId) return
+    
+    // If we have initial state, trigger onComplete if completed
+    if (initialStatus === 'completed' && onComplete) {
+      onComplete(jobId)
+      return
+    }
+    
+    // Skip fetching if we already have initial state
+    if (initialStatus) {
+      setIsRestoring(false)
+      return
+    }
+    
+    const fetchJobState = async () => {
+      try {
+        console.log(`🔄 Fetching job state for ${jobId}`)
+        const response = await fetch(`/api/v4/jobs/${jobId}/state`)
+        
+        if (!response.ok) {
+          console.error('Failed to fetch job state:', response.status)
+          setIsRestoring(false)
+          return
+        }
+        
+        const data = await response.json()
+        console.log('📦 Job state:', data)
+        
+        // Restore the state
+        if (data.success) {
+          // Set status based on data.status
+          if (data.status === 'completed') {
+            setStatus('completed')
+            setStats(prev => ({
+              ...prev,
+              endTime: Date.now(), // We don't have completedAt in the response
+              processed: data.totalProcessed || 0,
+              discovered: data.totalDiscovered || 0,
+              total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, 1)
+            }))
+            setDownloadUrl(`/api/v4/jobs/${jobId}/download`)
+            if (onComplete) {
+              onComplete(jobId)
+            }
+          } else if (data.status === 'failed') {
+            setStatus('failed')
+            setError(data.error || 'Job failed')
+            // Update stats for failed jobs too
+            setStats(prev => ({
+              ...prev,
+              processed: data.totalProcessed || 0,
+              discovered: data.totalDiscovered || 0,
+              total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, 1),
+              endTime: Date.now()
+            }))
+          } else if (data.status === 'timeout') {
+            setStatus('timeout')
+            setError(data.error || 'Job timed out')
+            // Update stats for timeout jobs too
+            setStats(prev => ({
+              ...prev,
+              processed: data.totalProcessed || 0,
+              discovered: data.totalDiscovered || 0,
+              total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, 1),
+              endTime: Date.now()
+            }))
+          } else {
+            // Job is still running
+            setStats(prev => ({
+              ...prev,
+              processed: data.totalProcessed || 0,
+              discovered: data.totalDiscovered || 0,
+              total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, 1)
+            }))
+          }
+          
+          // Restore last event ID for resumption
+          if (data.lastEventId) {
+            setLastEventId(data.lastEventId)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching job state:', error)
+      } finally {
+        setIsRestoring(false)
+      }
+    }
+    
+    fetchJobState()
+  }, [jobId, onComplete, initialStatus])
+
+  useEffect(() => {
+    if (!jobId || isRestoring) return
+    
+    // Skip SSE connection for completed/failed/timeout jobs
+    if (status === 'completed' || status === 'failed' || status === 'timeout') {
+      console.log(`⏭️ Skipping SSE connection for ${status} job ${jobId}`)
+      return
+    }
 
     let eventSource: EventSource | null = null
     let reconnectTimer: NodeJS.Timeout | null = null
@@ -66,7 +196,9 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
     const MAX_RECONNECT_ATTEMPTS = 3
 
     const connect = () => {
-      // Construct stream URL
+      // TODO: Proper stream resumption requires tracking character count, not event IDs
+      // The resumable-stream library expects skipCharacters (a number) but EventSource
+      // provides Last-Event-ID (a string). For now, we don't support resumption.
       const streamUrl = `/api/v4/jobs/${jobId}/stream`
       console.log(`🔗 Connecting to SSE stream: ${streamUrl}`)
 
@@ -92,8 +224,17 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
         }
       }
 
+      // Helper to update lastEventId from native event
+      const updateLastEventId = (event: MessageEvent) => {
+        // The lastEventId property is part of the MessageEvent interface
+        if (event.lastEventId) {
+          setLastEventId(event.lastEventId)
+        }
+      }
+
       // Handle specific events
       eventSource.addEventListener('stream_connected', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'stream_connected') {
           console.error('Failed to parse stream_connected event:', event.data)
@@ -105,6 +246,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('url_started', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'url_started') {
           console.error('Failed to parse url_started event:', event.data)
@@ -115,6 +257,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('url_crawled', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'url_crawled') {
           console.error('Failed to parse url_crawled event:', event.data)
@@ -134,6 +277,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('urls_discovered', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'urls_discovered') {
           console.error('Failed to parse urls_discovered event:', event.data)
@@ -152,6 +296,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('url_failed', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'url_failed') {
           console.error('Failed to parse url_failed event:', event.data)
@@ -162,6 +307,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('sent_to_processing', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'sent_to_processing') {
           console.error('Failed to parse sent_to_processing event:', event.data)
@@ -172,6 +318,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('progress', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'progress') {
           console.error('Failed to parse progress event:', event.data)
@@ -189,6 +336,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('time_update', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'time_update') {
           console.error('Failed to parse time_update event:', event.data)
@@ -206,6 +354,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('job_completed', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'job_completed') {
           console.error('Failed to parse job_completed event:', event.data)
@@ -233,6 +382,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('job_failed', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'job_failed') {
           console.error('Failed to parse job_failed event:', event.data)
@@ -247,6 +397,7 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
       })
 
       eventSource.addEventListener('job_timeout', (event) => {
+        updateLastEventId(event)
         const data = parseSSEEvent(event.data)
         if (!data || data.type !== 'job_timeout') {
           console.error('Failed to parse job_timeout event:', event.data)
@@ -279,9 +430,13 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
         clearTimeout(reconnectTimer)
       }
     }
-  }, [jobId, onComplete])
+  }, [jobId, onComplete, isRestoring, status])
 
   const getStatusIcon = () => {
+    if (isRestoring) {
+      return <RefreshCw className="h-5 w-5 animate-spin text-purple-500" />
+    }
+    
     switch (status) {
       case 'connecting':
         return <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
@@ -299,6 +454,14 @@ export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: Craw
   }
 
   const getStatusBadge = () => {
+    if (isRestoring) {
+      return (
+        <Badge variant="secondary" className="font-medium">
+          Restoring...
+        </Badge>
+      )
+    }
+    
     const variants = {
       connecting: 'outline',
       processing: 'default',

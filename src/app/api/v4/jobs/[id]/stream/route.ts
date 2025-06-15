@@ -88,7 +88,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           if (!safeEnqueue(`event: url_started\ndata: ${JSON.stringify(startEvent)}\nid: start-${Date.now()}-${Math.random()}\n\n`)) {
             return
           }
-          await storeSSEEvent(jobId, 'url_started', startEvent)
+          await storeSSEEvent(jobId, userId, 'url_started', startEvent)
           
           // Call crawler for single URL
           const response = await fetch(
@@ -131,7 +131,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               timestamp: new Date().toISOString()
             }
             safeEnqueue(`event: url_crawled\ndata: ${JSON.stringify(crawledEvent)}\nid: crawled-${Date.now()}-${Math.random()}\n\n`)
-            await storeSSEEvent(jobId, 'url_crawled', crawledEvent)
+            await storeSSEEvent(jobId, userId, 'url_crawled', crawledEvent)
             
             // Handle discovered URLs
             if (crawled.discoveredUrls && crawled.discoveredUrls.length > 0 && depth < 3) {
@@ -151,7 +151,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
                   timestamp: new Date().toISOString()
                 }
                 safeEnqueue(`event: urls_discovered\ndata: ${JSON.stringify(discoveredEvent)}\nid: discovered-${Date.now()}-${Math.random()}\n\n`)
-                await storeSSEEvent(jobId, 'urls_discovered', discoveredEvent)
+                await storeSSEEvent(jobId, userId, 'urls_discovered', discoveredEvent)
                 
                 // Add discovered URLs to queue (don't await, let them process in parallel)
                 if (!isShuttingDown) {
@@ -183,7 +183,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
                 timestamp: new Date().toISOString()
               }
               safeEnqueue(`event: sent_to_processing\ndata: ${JSON.stringify(processingEvent)}\nid: processing-${Date.now()}-${Math.random()}\n\n`)
-              await storeSSEEvent(jobId, 'sent_to_processing', processingEvent)
+              await storeSSEEvent(jobId, userId, 'sent_to_processing', processingEvent)
               
               // Fire and forget - don't await
               fetch(
@@ -206,7 +206,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               timestamp: new Date().toISOString()
             }
             safeEnqueue(`event: progress\ndata: ${JSON.stringify(progressEvent)}\nid: progress-${Date.now()}-${Math.random()}\n\n`)
-            await storeSSEEvent(jobId, 'progress', progressEvent)
+            await storeSSEEvent(jobId, userId, 'progress', progressEvent)
             
           } else if (result.failed && result.failed.length > 0) {
             // Handle failed crawl
@@ -218,7 +218,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               timestamp: new Date().toISOString()
             }
             safeEnqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
-            await storeSSEEvent(jobId, 'url_failed', errorEvent)
+            await storeSSEEvent(jobId, userId, 'url_failed', errorEvent)
           }
           
         } catch (error) {
@@ -231,7 +231,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
             timestamp: new Date().toISOString()
           }
           safeEnqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
-          await storeSSEEvent(jobId, 'url_failed', errorEvent)
+          await storeSSEEvent(jobId, userId, 'url_failed', errorEvent)
         }
       }
       
@@ -278,7 +278,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         
         // Store time update event in database
         try {
-          await storeSSEEvent(jobId, 'time_update', timeEvent)
+          await storeSSEEvent(jobId, userId, 'time_update', timeEvent)
         } catch (error) {
           console.error('Failed to store time update event:', error)
         }
@@ -315,7 +315,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         }
         
         // Store connection event in database
-        await storeSSEEvent(jobId, 'stream_connected', connectionEvent)
+        await storeSSEEvent(jobId, userId, 'stream_connected', connectionEvent)
         
         // Start processing the initial URL
         queue.add(() => processUrl(job.url, 0))
@@ -372,7 +372,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           ...(statusMessage && { message: statusMessage })
         }
         safeEnqueue(`event: ${finalEvent.type}\ndata: ${JSON.stringify(finalEvent)}\nid: ${finalStatus}-${Date.now()}\n\n`)
-        await storeSSEEvent(jobId, finalEvent.type, finalEvent)
+        await storeSSEEvent(jobId, userId, finalEvent.type, finalEvent)
         
       } catch (error) {
         console.error('Orchestrator error:', error)
@@ -390,7 +390,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           timestamp: new Date().toISOString()
         }
         safeEnqueue(`event: job_failed\ndata: ${JSON.stringify(failedEvent)}\nid: failed-${Date.now()}\n\n`)
-        await storeSSEEvent(jobId, 'job_failed', failedEvent)
+        await storeSSEEvent(jobId, userId, 'job_failed', failedEvent)
       } finally {
         controller.close()
         isControllerClosed = true
@@ -404,12 +404,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: jobId } = await params
-  const resumeAt = request.nextUrl.searchParams.get("resumeAt")
+  // TODO: Proper stream resumption requires tracking character count, not event IDs
+  // The resumable-stream library expects skipCharacters (a number) but EventSource
+  // provides Last-Event-ID (a string). For now, we don't support resumption.
+  // const skipCharacters = request.nextUrl.searchParams.get("skipCharacters")
   
   // Get current user (authenticated or anonymous)
   const user = await getCurrentUser(request)
   
-  console.log(`🚀 Starting V4 orchestrator stream for job: ${jobId} (user: ${user.id})${resumeAt ? ` (resuming from ${resumeAt})` : ''}`)
+  console.log(`🚀 Starting V4 orchestrator stream for job: ${jobId} (user: ${user.id})`)
   
   let publisher: ReturnType<typeof createRedisClient> | null = null
   let subscriber: ReturnType<typeof createRedisClient> | null = null
@@ -466,8 +469,8 @@ export async function GET(
     // Create resumable stream - pass a closure that captures userId
     const stream = await streamContext.resumableStream(
       `v4-job-${jobId}`,
-      () => makeJobStream(`v4-job-${jobId}`, user.id),
-      resumeAt ? parseInt(resumeAt) : undefined
+      () => makeJobStream(`v4-job-${jobId}`, user.id)
+      // skipCharacters: skipCharacters ? parseInt(skipCharacters) : undefined
     )
     
     if (!stream) {

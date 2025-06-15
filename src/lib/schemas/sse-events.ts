@@ -127,7 +127,11 @@ export function parseSSEEvent(data: string): SSEEvent | null {
     const parsed = JSON.parse(data)
     return sseEventSchema.parse(parsed)
   } catch (error) {
-    console.error('Failed to parse SSE event:', error)
+    console.error('Failed to parse SSE event:', {
+      rawData: data,
+      error: error instanceof Error ? error.message : error,
+      zodIssues: error instanceof z.ZodError ? error.issues : undefined
+    })
     return null
   }
 }

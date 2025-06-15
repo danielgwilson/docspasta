@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Sparkles, ArrowRight, Globe, RefreshCw } from 'lucide-react'
-import { CrawlCard } from '@/components/CrawlCard'
+import { CrawlProgress } from '@/components/CrawlProgress'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface ActiveJob {
@@ -17,6 +17,11 @@ interface ActiveJob {
   pagesProcessed?: number
   pagesFound?: number
   totalWords?: number
+  // Batch state fields
+  totalProcessed?: number
+  totalDiscovered?: number
+  lastEventId?: string | null
+  error?: string | null
 }
 
 export default function Home() {
@@ -25,6 +30,7 @@ export default function Home() {
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([])
   const [error, setError] = useState('')
   const [forceRefresh, setForceRefresh] = useState(false)
+  const [isLoadingStates, setIsLoadingStates] = useState(false)
 
   // Load jobs from localStorage on mount (for anonymous users)
   useEffect(() => {
@@ -49,6 +55,74 @@ export default function Home() {
       }
     }
   }, [])
+
+  // Fetch batch states when activeJobs changes (on mount or when new jobs are added)
+  useEffect(() => {
+    if (activeJobs.length === 0 || isLoadingStates) return
+
+    const fetchBatchStates = async () => {
+      setIsLoadingStates(true)
+      try {
+        console.log('🔄 Fetching batch states for', activeJobs.length, 'jobs')
+        
+        const response = await fetch('/api/v4/jobs/batch-state', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            jobIds: activeJobs.map(job => job.jobId)
+          })
+        })
+
+        if (!response.ok) {
+          console.error('Failed to fetch batch states:', response.status)
+          return
+        }
+
+        const data = await response.json()
+        console.log('📦 Batch states response:', data)
+
+        if (data.success && data.states) {
+          // Update activeJobs with the fetched states
+          setActiveJobs(prevJobs => 
+            prevJobs.map(job => {
+              const state = data.states[job.jobId]
+              if (state) {
+                return {
+                  ...job,
+                  status: state.status,
+                  totalProcessed: state.totalProcessed,
+                  totalDiscovered: state.totalDiscovered,
+                  lastEventId: state.lastEventId,
+                  error: state.error
+                }
+              }
+              return job
+            })
+          )
+        }
+
+        // Remove jobs that were not found
+        if (data.notFound && data.notFound.length > 0) {
+          console.log('🗑️ Removing not found jobs:', data.notFound)
+          setActiveJobs(prevJobs => 
+            prevJobs.filter(job => !data.notFound.includes(job.jobId))
+          )
+        }
+      } catch (error) {
+        console.error('Error fetching batch states:', error)
+      } finally {
+        setIsLoadingStates(false)
+      }
+    }
+
+    // Only fetch states if we don't already have them
+    const jobsWithoutStates = activeJobs.filter(job => !job.status)
+    if (jobsWithoutStates.length > 0) {
+      fetchBatchStates()
+    }
+  }, [activeJobs.length]) // Only depend on length to avoid infinite loops
 
   // Save active jobs to localStorage whenever they change
   useEffect(() => {
@@ -275,9 +349,17 @@ export default function Home() {
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-4 mt-8"
               >
-                <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
-                  Active Crawls
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
+                    Active Crawls
+                  </h2>
+                  {isLoadingStates && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      Loading states...
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-4">
                   {activeJobs.map((job) => (
                     <motion.div
@@ -287,10 +369,9 @@ export default function Home() {
                       exit={{ opacity: 0, scale: 0.95 }}
                       layout
                     >
-                      <CrawlCard
+                      <CrawlProgress
                         jobId={job.jobId}
                         url={job.url}
-                        onComplete={handleJobComplete}
                         onDismiss={handleJobDismiss}
                       />
                     </motion.div>
