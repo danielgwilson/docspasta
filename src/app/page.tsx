@@ -11,6 +11,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 interface ActiveJob {
   jobId: string
   url: string
+  status?: string
+  createdAt?: string
+  completedAt?: string
+  pagesProcessed?: number
+  pagesFound?: number
+  totalWords?: number
 }
 
 export default function Home() {
@@ -19,6 +25,51 @@ export default function Home() {
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([])
   const [error, setError] = useState('')
   const [forceRefresh, setForceRefresh] = useState(false)
+
+  // Load jobs from localStorage on mount (for anonymous users)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedJobs = localStorage.getItem('docspasta-active-jobs')
+        if (savedJobs) {
+          const parsedJobs = JSON.parse(savedJobs)
+          // Validate the structure and keep only minimal data
+          if (Array.isArray(parsedJobs)) {
+            const validJobs = parsedJobs
+              .filter(job => job.jobId && job.url)
+              .map(job => ({
+                jobId: job.jobId,
+                url: job.url
+              }))
+            setActiveJobs(validJobs)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load active jobs from localStorage:', err)
+      }
+    }
+  }, [])
+
+  // Save active jobs to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (activeJobs.length > 0) {
+          // Save only minimal data to keep localStorage lean
+          const jobsToSave = activeJobs.map(job => ({
+            jobId: job.jobId,
+            url: job.url
+          }))
+          localStorage.setItem('docspasta-active-jobs', JSON.stringify(jobsToSave))
+        } else {
+          // Clear localStorage when no active jobs
+          localStorage.removeItem('docspasta-active-jobs')
+        }
+      } catch (err) {
+        console.error('Failed to save active jobs to localStorage:', err)
+      }
+    }
+  }, [activeJobs])
 
   // Initialize dev processor in development
   useEffect(() => {
@@ -80,10 +131,12 @@ export default function Home() {
 
   const handleJobComplete = (jobId: string) => {
     console.log(`Job ${jobId} completed`)
-    // Optionally remove from active jobs after a delay
-    setTimeout(() => {
-      setActiveJobs(prev => prev.filter(job => job.jobId !== jobId))
-    }, 30000) // Keep completed jobs visible for 30 seconds
+    // Keep completed jobs visible until dismissed
+  }
+
+  const handleJobDismiss = (jobId: string) => {
+    // Remove the job from activeJobs
+    setActiveJobs(prev => prev.filter(job => job.jobId !== jobId))
   }
   
   return (
@@ -238,6 +291,7 @@ export default function Home() {
                         jobId={job.jobId}
                         url={job.url}
                         onComplete={handleJobComplete}
+                        onDismiss={handleJobDismiss}
                       />
                     </motion.div>
                   ))}

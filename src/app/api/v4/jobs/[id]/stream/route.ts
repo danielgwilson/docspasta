@@ -35,6 +35,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
       let totalProcessed = 0
       let totalDiscovered = 0
       let isShuttingDown = false
+      let isControllerClosed = false
       
       // Create p-queue for concurrency control
       const queue = new PQueue({ concurrency: MAX_CONCURRENT_CRAWLS })
@@ -46,6 +47,25 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
       // Variables to be set after job is loaded
       let job: any
       let forceRefresh: boolean
+      
+      // Safe enqueue helper to prevent "Controller is already closed" errors
+      const safeEnqueue = (data: string): boolean => {
+        if (isControllerClosed) {
+          return false
+        }
+        try {
+          controller.enqueue(data)
+          return true
+        } catch (error) {
+          console.error('Failed to enqueue data (controller closed):', error)
+          isControllerClosed = true
+          return false
+        }
+      }
+      
+      // Declare interval variables so they can be referenced in the functions
+      let heartbeatInterval: NodeJS.Timeout
+      let timeUpdateInterval: NodeJS.Timeout
       
       // Function to process a single URL
       const processUrl = async (url: string, depth: number) => {
@@ -65,7 +85,9 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
             depth,
             timestamp: new Date().toISOString()
           }
-          controller.enqueue(`event: url_started\ndata: ${JSON.stringify(startEvent)}\nid: start-${Date.now()}-${Math.random()}\n\n`)
+          if (!safeEnqueue(`event: url_started\ndata: ${JSON.stringify(startEvent)}\nid: start-${Date.now()}-${Math.random()}\n\n`)) {
+            return
+          }
           await storeSSEEvent(jobId, 'url_started', startEvent)
           
           // Call crawler for single URL
@@ -102,10 +124,13 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               success: true,
               content_length: crawled.content?.length || 0,
               title: crawled.title,
-              quality: crawled.quality,
+              quality: crawled.quality ? {
+                score: crawled.quality.score || 0,
+                reason: crawled.quality.reason || 'unknown'
+              } : undefined,
               timestamp: new Date().toISOString()
             }
-            controller.enqueue(`event: url_crawled\ndata: ${JSON.stringify(crawledEvent)}\nid: crawled-${Date.now()}-${Math.random()}\n\n`)
+            safeEnqueue(`event: url_crawled\ndata: ${JSON.stringify(crawledEvent)}\nid: crawled-${Date.now()}-${Math.random()}\n\n`)
             await storeSSEEvent(jobId, 'url_crawled', crawledEvent)
             
             // Handle discovered URLs
@@ -125,7 +150,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
                   total_discovered: totalDiscovered,
                   timestamp: new Date().toISOString()
                 }
-                controller.enqueue(`event: urls_discovered\ndata: ${JSON.stringify(discoveredEvent)}\nid: discovered-${Date.now()}-${Math.random()}\n\n`)
+                safeEnqueue(`event: urls_discovered\ndata: ${JSON.stringify(discoveredEvent)}\nid: discovered-${Date.now()}-${Math.random()}\n\n`)
                 await storeSSEEvent(jobId, 'urls_discovered', discoveredEvent)
                 
                 // Add discovered URLs to queue (don't await, let them process in parallel)
@@ -143,7 +168,10 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
                 url: crawled.url,
                 content: crawled.content,
                 title: crawled.title || crawled.url,
-                quality: crawled.quality || { score: 0, reason: 'unknown' },
+                quality: crawled.quality ? {
+                  score: crawled.quality.score || 0,
+                  reason: crawled.quality.reason || 'unknown'
+                } : { score: 0, reason: 'unknown' },
                 wordCount: crawled.content.split(/\s+/).length
               }
               
@@ -154,7 +182,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
                 word_count: processResult.wordCount,
                 timestamp: new Date().toISOString()
               }
-              controller.enqueue(`event: sent_to_processing\ndata: ${JSON.stringify(processingEvent)}\nid: processing-${Date.now()}-${Math.random()}\n\n`)
+              safeEnqueue(`event: sent_to_processing\ndata: ${JSON.stringify(processingEvent)}\nid: processing-${Date.now()}-${Math.random()}\n\n`)
               await storeSSEEvent(jobId, 'sent_to_processing', processingEvent)
               
               // Fire and forget - don't await
@@ -177,7 +205,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               pending: queue.pending,
               timestamp: new Date().toISOString()
             }
-            controller.enqueue(`event: progress\ndata: ${JSON.stringify(progressEvent)}\nid: progress-${Date.now()}-${Math.random()}\n\n`)
+            safeEnqueue(`event: progress\ndata: ${JSON.stringify(progressEvent)}\nid: progress-${Date.now()}-${Math.random()}\n\n`)
             await storeSSEEvent(jobId, 'progress', progressEvent)
             
           } else if (result.failed && result.failed.length > 0) {
@@ -189,7 +217,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
               error: failed.error || 'Unknown error',
               timestamp: new Date().toISOString()
             }
-            controller.enqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
+            safeEnqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
             await storeSSEEvent(jobId, 'url_failed', errorEvent)
           }
           
@@ -202,23 +230,29 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
             error: errorMessage,
             timestamp: new Date().toISOString()
           }
-          controller.enqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
+          safeEnqueue(`event: url_failed\ndata: ${JSON.stringify(errorEvent)}\nid: failed-${Date.now()}-${Math.random()}\n\n`)
           await storeSSEEvent(jobId, 'url_failed', errorEvent)
         }
       }
       
       // Heartbeat function
       const sendHeartbeat = () => {
+        if (isControllerClosed || isShuttingDown) return
+        
         const now = Date.now()
-        if (now - lastHeartbeat > HEARTBEAT_INTERVAL_MS && !isShuttingDown) {
-          controller.enqueue(`: heartbeat\n\n`)
+        if (now - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
+          if (!safeEnqueue(`: heartbeat\n\n`)) {
+            // If enqueue failed, clear the interval
+            clearInterval(heartbeatInterval)
+            return
+          }
           lastHeartbeat = now
         }
       }
       
       // Time update function - sends elapsed time every second
       const sendTimeUpdate = async () => {
-        if (isShuttingDown) return
+        if (isControllerClosed || isShuttingDown) return
         
         const elapsed = Math.floor((Date.now() - startTime) / 1000)
         const minutes = Math.floor(elapsed / 60)
@@ -236,7 +270,11 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           timestamp: new Date().toISOString()
         }
         
-        controller.enqueue(`event: time_update\ndata: ${JSON.stringify(timeEvent)}\nid: time-${Date.now()}-${Math.random()}\n\n`)
+        if (!safeEnqueue(`event: time_update\ndata: ${JSON.stringify(timeEvent)}\nid: time-${Date.now()}-${Math.random()}\n\n`)) {
+          // If enqueue failed, clear the interval
+          clearInterval(timeUpdateInterval)
+          return
+        }
         
         // Store time update event in database
         try {
@@ -247,17 +285,18 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
       }
       
       // Set up heartbeat interval
-      const heartbeatInterval = setInterval(sendHeartbeat, 1000)
+      heartbeatInterval = setInterval(sendHeartbeat, 1000)
       
       // Set up time update interval - every second
-      const timeUpdateInterval = setInterval(sendTimeUpdate, 1000)
+      timeUpdateInterval = setInterval(sendTimeUpdate, 1000)
       
       try {
         // Verify job exists and belongs to user
         job = await getJob(jobId, userId)
         if (!job) {
-          controller.enqueue(`event: job_failed\ndata: ${JSON.stringify({ error: 'Job not found', jobId })}\nid: job-not-found-${Date.now()}\n\n`)
+          safeEnqueue(`event: job_failed\ndata: ${JSON.stringify({ type: 'job_failed', error: 'Job not found', jobId, timestamp: new Date().toISOString() })}\nid: job-not-found-${Date.now()}\n\n`)
           controller.close()
+          isControllerClosed = true
           return
         }
         
@@ -265,10 +304,18 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         forceRefresh = job.error_message === 'FORCE_REFRESH'
         
         // Send initial connection event
-        controller.enqueue(`event: stream_connected\ndata: ${JSON.stringify({ jobId, url: job.url })}\nid: connected-${Date.now()}\n\n`)
+        const connectionEvent = {
+          type: 'stream_connected',
+          jobId,
+          url: job.url,
+          timestamp: new Date().toISOString()
+        }
+        if (!safeEnqueue(`event: stream_connected\ndata: ${JSON.stringify(connectionEvent)}\nid: connected-${Date.now()}\n\n`)) {
+          return
+        }
         
         // Store connection event in database
-        await storeSSEEvent(jobId, 'stream_connected', { jobId, url: job.url })
+        await storeSSEEvent(jobId, 'stream_connected', connectionEvent)
         
         // Start processing the initial URL
         queue.add(() => processUrl(job.url, 0))
@@ -324,7 +371,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           timestamp: new Date().toISOString(),
           ...(statusMessage && { message: statusMessage })
         }
-        controller.enqueue(`event: ${finalEvent.type}\ndata: ${JSON.stringify(finalEvent)}\nid: ${finalStatus}-${Date.now()}\n\n`)
+        safeEnqueue(`event: ${finalEvent.type}\ndata: ${JSON.stringify(finalEvent)}\nid: ${finalStatus}-${Date.now()}\n\n`)
         await storeSSEEvent(jobId, finalEvent.type, finalEvent)
         
       } catch (error) {
@@ -342,10 +389,11 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           error: errorMessage,
           timestamp: new Date().toISOString()
         }
-        controller.enqueue(`event: job_failed\ndata: ${JSON.stringify(failedEvent)}\nid: failed-${Date.now()}\n\n`)
+        safeEnqueue(`event: job_failed\ndata: ${JSON.stringify(failedEvent)}\nid: failed-${Date.now()}\n\n`)
         await storeSSEEvent(jobId, 'job_failed', failedEvent)
       } finally {
         controller.close()
+        isControllerClosed = true
       }
     }
   })
@@ -369,11 +417,24 @@ export async function GET(
   // Cleanup function
   const cleanup = async () => {
     try {
-      await Promise.all([
-        publisher?.disconnect?.().catch((err) => console.error('Error disconnecting publisher:', err)),
-        subscriber?.disconnect?.().catch((err) => console.error('Error disconnecting subscriber:', err))
-      ].filter(Boolean))
-      console.log('🔌 Redis connections cleaned up')
+      const cleanupPromises = []
+      
+      if (publisher?.disconnect) {
+        cleanupPromises.push(
+          publisher.disconnect().catch((err) => console.error('Error disconnecting publisher:', err))
+        )
+      }
+      
+      if (subscriber?.disconnect) {
+        cleanupPromises.push(
+          subscriber.disconnect().catch((err) => console.error('Error disconnecting subscriber:', err))
+        )
+      }
+      
+      if (cleanupPromises.length > 0) {
+        await Promise.all(cleanupPromises)
+        console.log('🔌 Redis connections cleaned up')
+      }
     } catch (error) {
       console.error('Error during cleanup:', error)
     } finally {

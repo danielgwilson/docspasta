@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createJob, getActiveJobs } from '@/lib/serverless/db-operations-simple'
+import { createJob, getActiveJobs, getRecentJobs } from '@/lib/serverless/db-operations-simple'
 import { isValidCrawlUrl } from '@/lib/serverless/url-utils'
 import { getCurrentUser } from '@/lib/auth/middleware'
 
@@ -7,14 +7,18 @@ export async function GET(request: NextRequest) {
   try {
     // Get current user (authenticated or anonymous)
     const user = await getCurrentUser(request)
-    const jobs = await getActiveJobs(user.id)
+    
+    // Fetch recent jobs (both running and recently completed)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    
+    const jobs = await getRecentJobs(user.id, oneHourAgo)
     
     return NextResponse.json({
       success: true,
       data: jobs
     })
   } catch (error) {
-    console.error('Failed to get active jobs:', error)
+    console.error('Failed to get recent jobs:', error)
     
     return NextResponse.json({
       success: false,

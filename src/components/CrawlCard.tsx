@@ -17,7 +17,8 @@ import {
   Loader2,
   RefreshCw,
   Sparkles,
-  Activity
+  Activity,
+  X
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { parseSSEEvent } from '@/lib/schemas/sse-events'
@@ -26,6 +27,7 @@ interface CrawlCardProps {
   jobId: string
   url: string
   onComplete?: (jobId: string) => void
+  onDismiss?: (jobId: string) => void
   className?: string
 }
 
@@ -39,7 +41,7 @@ interface CrawlStats {
 
 type JobStatus = 'idle' | 'connecting' | 'processing' | 'completed' | 'failed' | 'timeout'
 
-export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps) {
+export function CrawlCard({ jobId, url, onComplete, onDismiss, className }: CrawlCardProps) {
   const [status, setStatus] = useState<JobStatus>('connecting')
   const [stats, setStats] = useState<CrawlStats>({
     processed: 0,
@@ -348,11 +350,24 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
               {url}
             </CardDescription>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            {getStatusBadge()}
-            <span className="text-xs text-muted-foreground font-mono">
-              {getDuration()}
-            </span>
+          <div className="flex items-start gap-2">
+            <div className="flex flex-col items-end gap-2">
+              {getStatusBadge()}
+              <span className="text-xs text-muted-foreground font-mono">
+                {getDuration()}
+              </span>
+            </div>
+            {onDismiss && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full hover:bg-destructive/10"
+                onClick={() => onDismiss(jobId)}
+                aria-label="Dismiss"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>

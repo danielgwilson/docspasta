@@ -32,6 +32,22 @@ export async function getActiveJobs(userId: string) {
   return result
 }
 
+export async function getRecentJobs(userId: string, sinceTime: string) {
+  const result = await sql`
+    SELECT id, url, status, created_at, completed_at, pages_processed, pages_found, total_words
+    FROM jobs
+    WHERE user_id = ${userId}
+      AND (
+        status = 'running' 
+        OR (status = 'completed' AND completed_at >= ${sinceTime})
+        OR (status = 'failed' AND completed_at >= ${sinceTime})
+      )
+    ORDER BY created_at DESC
+    LIMIT 20
+  `
+  return result
+}
+
 export async function updateJobStatus(jobId: string, status: string, error?: string) {
   await sql`
     UPDATE jobs 
@@ -118,13 +134,12 @@ export async function getCombinedMarkdown(jobId: string, userId: string) {
       j.url,
       j.final_markdown as content,
       j.pages_processed as "pageCount",
-      COALESCE(
-        (SELECT p.title FROM pages p 
-         WHERE p.job_id = j.id 
-         ORDER BY p.created_at 
-         LIMIT 1), 
-        'Documentation'
-      ) as title
+      CASE 
+        WHEN j.url LIKE '%://%' THEN 
+          SPLIT_PART(SPLIT_PART(j.url, '://', 2), '/', 1) || ' Documentation'
+        ELSE 
+          'Documentation'
+      END as title
     FROM jobs j
     WHERE j.id = ${jobId}
       AND j.user_id = ${userId}
