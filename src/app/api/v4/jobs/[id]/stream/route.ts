@@ -216,14 +216,47 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
         }
       }
       
+      // Time update function - sends elapsed time every second
+      const sendTimeUpdate = async () => {
+        if (isShuttingDown) return
+        
+        const elapsed = Math.floor((Date.now() - startTime) / 1000)
+        const minutes = Math.floor(elapsed / 60)
+        const seconds = elapsed % 60
+        const formatted = `${minutes}:${seconds.toString().padStart(2, '0')}`
+        
+        const timeEvent = {
+          type: 'time_update',
+          elapsed,
+          formatted,
+          totalProcessed,
+          totalDiscovered,
+          queueSize: queue.size,
+          pendingCount: queue.pending,
+          timestamp: new Date().toISOString()
+        }
+        
+        controller.enqueue(`event: time_update\ndata: ${JSON.stringify(timeEvent)}\nid: time-${Date.now()}-${Math.random()}\n\n`)
+        
+        // Store time update event in database
+        try {
+          await storeSSEEvent(jobId, 'time_update', timeEvent)
+        } catch (error) {
+          console.error('Failed to store time update event:', error)
+        }
+      }
+      
       // Set up heartbeat interval
       const heartbeatInterval = setInterval(sendHeartbeat, 1000)
+      
+      // Set up time update interval - every second
+      const timeUpdateInterval = setInterval(sendTimeUpdate, 1000)
       
       try {
         // Verify job exists and belongs to user
         job = await getJob(jobId, userId)
         if (!job) {
-          controller.enqueue(`event: error\ndata: ${JSON.stringify({ error: 'Job not found' })}\nid: error-${Date.now()}\n\n`)
+          controller.enqueue(`event: job_failed\ndata: ${JSON.stringify({ error: 'Job not found', jobId })}\nid: job-not-found-${Date.now()}\n\n`)
           controller.close()
           return
         }
@@ -268,8 +301,9 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
           await new Promise(resolve => setTimeout(resolve, 100))
         }
         
-        // Clear heartbeat interval
+        // Clear intervals
         clearInterval(heartbeatInterval)
+        clearInterval(timeUpdateInterval)
         
         // Determine final status
         const timedOut = Date.now() - startTime >= TIMEOUT_MS
@@ -296,6 +330,7 @@ function makeJobStream(streamId: string, userId: string): ReadableStream<string>
       } catch (error) {
         console.error('Orchestrator error:', error)
         clearInterval(heartbeatInterval)
+        clearInterval(timeUpdateInterval)
         isShuttingDown = true
         
         const errorMessage = error instanceof Error ? error.message : 'Unknown error'

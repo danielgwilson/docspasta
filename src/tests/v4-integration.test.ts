@@ -1,63 +1,77 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { sql } from '@neondatabase/serverless'
 
-// Mock the entire architecture
-describe('V4 Event-Driven Queue Integration', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+describe('V4 Integration Test', () => {
+  let testJobId: string
+  
+  beforeAll(async () => {
+    // Clean up any test data
+    await sql`DELETE FROM jobs WHERE url LIKE '%test-integration%'`
   })
-
-  afterEach(() => {
-    vi.clearAllMocks()
+  
+  afterAll(async () => {
+    // Clean up after test
+    if (testJobId) {
+      await sql`DELETE FROM jobs WHERE id = ${testJobId}`
+    }
   })
-
-  describe('Architecture Components', () => {
-    it('should have job creation endpoint that initializes queue', async () => {
-      // Job creation:
-      // 1. Creates job in database
-      // 2. Adds initial URL to Redis queue
-      // 3. Spawns 3-5 initial workers
-      // 4. Returns stream URL
-      expect(true).toBe(true)
+  
+  it('should create a job and verify SSE endpoint is accessible', async () => {
+    // Create a test job
+    const response = await fetch('http://localhost:3000/api/v4/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        url: 'https://example.com/test-integration',
+        force: false 
+      })
     })
-
-    it('should have workers that process from Redis queue', async () => {
-      // Worker flow:
-      // 1. Pop tasks from Redis queue
-      // 2. Call crawler with tasks
-      // 3. Store SSE events for progress
-      // 4. Add discovered URLs back to queue
-      // 5. Self-invoke if more work exists
-      expect(true).toBe(true)
+    
+    expect(response.ok).toBe(true)
+    const result = await response.json()
+    
+    expect(result.success).toBe(true)
+    expect(result.data.jobId).toBeDefined()
+    expect(result.data.url).toBe('https://example.com/test-integration')
+    
+    testJobId = result.data.jobId
+    console.log('✅ Created test job:', testJobId)
+    
+    // Test that the SSE endpoint is accessible
+    const streamUrl = `http://localhost:3000/api/v4/jobs/${testJobId}/stream`
+    console.log('🔗 Testing SSE endpoint:', streamUrl)
+    
+    // We can't easily test EventSource in Node, but we can check if the endpoint exists
+    const streamResponse = await fetch(streamUrl, {
+      headers: { 'Accept': 'text/event-stream' }
     })
-
-    it('should have stream endpoint that only reads events', async () => {
-      // Stream endpoint:
-      // 1. Reads SSE events from database
-      // 2. Sends events to client
-      // 3. No orchestration logic
-      // 4. Terminates on completion events
-      expect(true).toBe(true)
-    })
-
-    it('should handle concurrent workers properly', async () => {
-      // Concurrency control:
-      // 1. Max 5 workers per job
-      // 2. Worker count tracked in Redis
-      // 3. Workers spawn continuations as needed
-      // 4. Graceful completion when queue empty
-      expect(true).toBe(true)
-    })
+    
+    expect(streamResponse.ok).toBe(true)
+    expect(streamResponse.headers.get('content-type')).toBe('text/event-stream')
+    console.log('✅ SSE endpoint is accessible')
+    
+    // Close the connection
+    await streamResponse.body?.cancel()
   })
-
-  describe('Data Flow', () => {
-    it('should flow from job creation to completion', async () => {
-      // Complete flow:
-      // 1. POST /api/v4/jobs creates job
-      // 2. Workers start processing
-      // 3. Stream reads progress events
-      // 4. Workers discover and queue new URLs
-      // 5. Job completes when queue empty
-      expect(true).toBe(true)
+  
+  it('should verify the crawler endpoint works', async () => {
+    // Test the crawler endpoint directly
+    const crawlResponse = await fetch('http://localhost:3000/api/v4/crawl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: 'test-crawler-check',
+        urls: [{ url: 'https://example.com', depth: 0 }],
+        originalJobUrl: 'https://example.com',
+        forceRefresh: false
+      })
     })
+    
+    expect(crawlResponse.ok).toBe(true)
+    const crawlResult = await crawlResponse.json()
+    
+    console.log('📊 Crawler response:', crawlResult)
+    expect(crawlResult).toBeDefined()
+    expect(crawlResult.completed || crawlResult.failed).toBeDefined()
   })
 })

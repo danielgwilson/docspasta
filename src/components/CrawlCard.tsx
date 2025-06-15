@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import {
   Activity
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { parseSSEEvent } from '@/lib/schemas/sse-events'
 
 interface CrawlCardProps {
   jobId: string
@@ -49,6 +50,10 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
   const [error, setError] = useState<string | null>(null)
   const [events, setEvents] = useState<string[]>([])
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  
+  // Use ref to access current status value in closures
+  const statusRef = useRef(status)
+  statusRef.current = status
 
   useEffect(() => {
     if (!jobId) return
@@ -75,11 +80,11 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
         console.error('❌ SSE error:', error)
         eventSource?.close()
 
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && status === 'processing') {
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && statusRef.current === 'processing') {
           reconnectAttempts++
           console.log(`🔄 Reconnecting... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
           reconnectTimer = setTimeout(connect, 2000 * reconnectAttempts)
-        } else if (status === 'processing') {
+        } else if (statusRef.current === 'processing') {
           setStatus('failed')
           setError('Connection lost')
         }
@@ -87,30 +92,123 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
 
       // Handle specific events
       eventSource.addEventListener('stream_connected', (event) => {
-        const data = JSON.parse(event.data)
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'stream_connected') {
+          console.error('Failed to parse stream_connected event:', event.data)
+          return
+        }
         console.log('📡 Stream connected:', data)
         setStatus('processing')
         addEvent(`Connected to ${data.url}`)
       })
 
+      eventSource.addEventListener('url_started', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'url_started') {
+          console.error('Failed to parse url_started event:', event.data)
+          return
+        }
+        console.log('🌐 URL started:', data)
+        addEvent(`Crawling: ${new URL(data.url).pathname}`)
+      })
+
+      eventSource.addEventListener('url_crawled', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'url_crawled') {
+          console.error('Failed to parse url_crawled event:', event.data)
+          return
+        }
+        console.log('✅ URL crawled:', data)
+        
+        // Update processed count
+        setStats(prev => ({
+          ...prev,
+          processed: prev.processed + 1
+        }))
+        
+        if (data.success) {
+          addEvent(`Completed: ${new URL(data.url).pathname} (${data.content_length} chars)`)
+        }
+      })
+
+      eventSource.addEventListener('urls_discovered', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'urls_discovered') {
+          console.error('Failed to parse urls_discovered event:', event.data)
+          return
+        }
+        console.log('🔍 URLs discovered:', data)
+        
+        // Update discovered count
+        setStats(prev => ({
+          ...prev,
+          discovered: data.total_discovered || prev.discovered,
+          total: Math.max(data.total_discovered || 0, prev.processed, prev.total)
+        }))
+        
+        addEvent(`Found ${data.count} new URLs from ${new URL(data.source_url).pathname}`)
+      })
+
+      eventSource.addEventListener('url_failed', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'url_failed') {
+          console.error('Failed to parse url_failed event:', event.data)
+          return
+        }
+        console.log('❌ URL failed:', data)
+        addEvent(`Failed: ${new URL(data.url).pathname} - ${data.error}`)
+      })
+
+      eventSource.addEventListener('sent_to_processing', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'sent_to_processing') {
+          console.error('Failed to parse sent_to_processing event:', event.data)
+          return
+        }
+        console.log('📤 Sent to processing:', data)
+        // This is more of a debug event, we don't need to show it to users
+      })
+
       eventSource.addEventListener('progress', (event) => {
-        const data = JSON.parse(event.data)
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'progress') {
+          console.error('Failed to parse progress event:', event.data)
+          return
+        }
         console.log('📊 Progress:', data)
         
+        // V4 progress event has different field names
+        setStats(prev => ({
+          ...prev,
+          processed: data.processed || prev.processed,
+          discovered: data.discovered || prev.discovered,
+          total: Math.max(data.discovered || 0, data.processed || 0, prev.total)
+        }))
+      })
+
+      eventSource.addEventListener('time_update', (event) => {
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'time_update') {
+          console.error('Failed to parse time_update event:', event.data)
+          return
+        }
+        console.log('⏱️ Time update:', data)
+        
+        // Update stats from time update which includes queue info
         setStats(prev => ({
           ...prev,
           processed: data.totalProcessed || prev.processed,
           discovered: data.totalDiscovered || prev.discovered,
           total: Math.max(data.totalDiscovered || 0, data.totalProcessed || 0, prev.total)
         }))
-
-        if (data.url) {
-          addEvent(`Processed: ${new URL(data.url).pathname}`)
-        }
       })
 
       eventSource.addEventListener('job_completed', (event) => {
-        const data = JSON.parse(event.data)
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'job_completed') {
+          console.error('Failed to parse job_completed event:', event.data)
+          return
+        }
         console.log('✅ Job completed:', data)
         
         setStatus('completed')
@@ -133,7 +231,11 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
       })
 
       eventSource.addEventListener('job_failed', (event) => {
-        const data = JSON.parse(event.data)
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'job_failed') {
+          console.error('Failed to parse job_failed event:', event.data)
+          return
+        }
         console.log('❌ Job failed:', data)
         
         setStatus('failed')
@@ -143,7 +245,11 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
       })
 
       eventSource.addEventListener('job_timeout', (event) => {
-        const data = JSON.parse(event.data)
+        const data = parseSSEEvent(event.data)
+        if (!data || data.type !== 'job_timeout') {
+          console.error('Failed to parse job_timeout event:', event.data)
+          return
+        }
         console.log('⏱️ Job timeout:', data)
         
         setStatus('timeout')
@@ -152,11 +258,8 @@ export function CrawlCard({ jobId, url, onComplete, className }: CrawlCardProps)
         eventSource?.close()
       })
 
-      eventSource.addEventListener('error', (event) => {
-        const data = JSON.parse(event.data)
-        console.log('⚠️ Error event:', data)
-        addEvent(`Error: ${data.error || data.message || 'Unknown error'}`)
-      })
+      // Note: Native EventSource 'error' events are handled by onerror above
+      // Server sends specific events like 'job_failed' for job-related errors
     }
 
     const addEvent = (message: string) => {
