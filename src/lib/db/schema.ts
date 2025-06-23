@@ -1,198 +1,181 @@
-import { pgTable, text, timestamp, integer, jsonb, pgEnum, uuid, index, uniqueIndex } from 'drizzle-orm/pg-core'
-import { sql, eq } from 'drizzle-orm'
-import { relations } from 'drizzle-orm'
-import { z } from 'zod'
+// =================================================================
+// Docspasta 2.0 -- The Definitive Drizzle ORM Schema
+//
+// Final Review Principles:
+// 1. Correct Imports: All helpers, including `sql`, are imported
+//    from their canonical, non-deprecated locations.
+// 2. Modern Syntax: Index definitions, especially partial unique
+//    indexes, use the current, fluent `.where()` API.
+// 3. Lean & Robust: The schema is the minimal set of tables
+//    required, with database-level guards (partial indexes) to
+//    ensure data integrity and prevent redundant work.
+// 4. Documented Intent: Comments clarify *why* each design
+//    decision was made, from caching to authentication.
+// =================================================================
+
+import { sql } from 'drizzle-orm';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  timestamp,
+  pgEnum,
+  boolean,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
+
+/* -------------------------------------------------------------------------- */
+/*                                    Enums                                   */
+/* -------------------------------------------------------------------------- */
+
+// Defines the caching behavior for a given source.
+export const cachePolicy = pgEnum('cache_policy', [
+  'always', // Always use the latest crawl unless explicitly told not to.
+  'ttl', // Use latest crawl if it's within the TTL.
+  'none', // Always trigger a new crawl by default.
+]);
+
+// Defines the lifecycle of a single crawl job.
+export const crawlState = pgEnum('crawl_state', [
+  'initial',
+  'running',
+  'finalized',
+  'error',
+]);
+
+/* -------------------------------------------------------------------------- */
+/*                                   Tables                                   */
+/* -------------------------------------------------------------------------- */
 
 /**
- * DOCSPASTA V2 REBUILD - Clean 3-Table Architecture
- * Based on Gemini's analysis with production-ready patterns
+ * 1. VISITORS
+ * Tracks a unique user, whether anonymous (via a cookie) or
+ * logged in (via Clerk). This allows associating anonymous activity
+ * with an account post-login.
  */
+export const visitors = pgTable('visitors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  cookieId: text('cookie_id').notNull(),
+  clerkUserId: text('clerk_user_id'), // Nullable until a user logs in
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
 
-// Status enums for type safety
-export const jobStatusEnum = pgEnum('job_status', [
-  'pending',
-  'running', 
-  'completed',
-  'failed',
-  'partial_success'
-])
+export const visitorsCookieIdIdx = uniqueIndex('visitors_cookie_id_idx').on(visitors.cookieId);
+export const visitorsClerkUserIdIdx = uniqueIndex('visitors_clerk_user_id_idx')
+  .on(visitors.clerkUserId)
+  .where(sql`clerk_user_id IS NOT NULL`);
 
-export const pageStatusEnum = pgEnum('page_status', [
-  'pending',
-  'crawled', 
-  'error',
-  'skipped'
-])
-
-// Crawl configuration schema for validation
-export const crawlConfigSchema = z.object({
-  maxDepth: z.number().min(1).max(10).default(2),
-  maxPages: z.number().min(1).max(1000).default(50),
-  qualityThreshold: z.number().min(0).max(100).default(20),
-  includeSelectors: z.array(z.string()).optional(),
-  excludeSelectors: z.array(z.string()).optional(),
-  respectRobots: z.boolean().default(true),
-  followSitemaps: z.boolean().default(true),
-})
-
-export type CrawlConfig = z.infer<typeof crawlConfigSchema>
-
-// 1. CRAWLING JOBS - Main job metadata and configuration
-export const crawlingJobs = pgTable('crawling_jobs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: text('user_id').notNull(), // User isolation
-  url: text('url').notNull(),
-  config: jsonb('config').$type<CrawlConfig>().notNull().default({}),
-  status: jobStatusEnum('status').notNull().default('pending'),
-  statusMessage: text('status_message'), // For error details
-
-  finalMarkdown: text('final_markdown'),
-  // V5 State versioning for efficient SSE streaming
-  stateVersion: integer('state_version').notNull().default(1),
-  progressSummary: jsonb('progress_summary').$type<{
-    totalProcessed: number
-    totalDiscovered: number
-    totalWords: number
-    discoveredUrls: number
-    failedUrls: number
-  }>().notNull().default({}),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  completedAt: timestamp('completed_at'),
-}, (table) => ({
-  // Critical indexes for performance
-  userIdIdx: index('crawling_jobs_user_id_idx').on(table.userId),
-  statusIdx: index('crawling_jobs_status_idx').on(table.status),
-  createdAtIdx: index('crawling_jobs_created_at_idx').on(table.createdAt),
-  // Partial index for worker queries (pending jobs only)
-  pendingJobsIdx: index('crawling_jobs_pending_idx').on(table.id).where(sql`status = 'pending'`),
-}))
-
-// 2. CRAWLED PAGES - Individual page metadata and status
-export const crawledPages = pgTable('crawled_pages', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  jobId: uuid('job_id').notNull().references(() => crawlingJobs.id, { onDelete: 'cascade' }),
-  url: text('url').notNull(),
-  urlHash: text('url_hash').notNull(), // For deduplication
+/**
+ * 2. SOURCES
+ * A canonical documentation source, uniquely identified by its scope.
+ * This table holds the "what" to crawl and its caching rules.
+ */
+export const sources = pgTable('sources', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  // The crawl scope, inspired by Cursor.
+  entrypointUrl: text('entrypoint_url').notNull(),
+  prefixUrl: text('prefix_url').notNull(),
+  // Human-readable metadata.
   title: text('title'),
-  status: pageStatusEnum('status').notNull().default('pending'),
-  httpStatus: integer('http_status'), // HTTP response code
-  errorMessage: text('error_message'),
-  depth: integer('depth').notNull().default(0),
-  discoveredFrom: text('discovered_from'), // Source URL
-  qualityScore: integer('quality_score').default(0),
-  wordCount: integer('word_count').default(0),
-  crawledAt: timestamp('crawled_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (table) => ({
-  // Foreign key index (Drizzle doesn't auto-create these!)
-  jobIdIdx: index('crawled_pages_job_id_idx').on(table.jobId),
-  // URL deduplication index
-  urlHashIdx: index('crawled_pages_url_hash_idx').on(table.urlHash),
-  // Status queries
-  statusIdx: index('crawled_pages_status_idx').on(table.status),
-  // Unique constraint per job (CRITICAL: prevents duplicate URLs per job)
-  uniqueJobUrl: uniqueIndex('crawled_pages_job_url_unique').on(table.jobId, table.urlHash),
-}))
+  description: text('description'),
+  faviconUrl: text('favicon_url'),
+  // --- Caching Strategy ---
+  // A pointer to the most recent successfully completed crawl.
+  latestCrawlId: uuid('latest_crawl_id'),
+  cachePolicy: cachePolicy('cache_policy').default('always'),
+  cacheTtlMinutes: integer('cache_ttl_minutes').default(10080), // 7 days
+  // --- Ownership & Metadata ---
+  createdBy: uuid('created_by').references(() => visitors.id),
+  isPublic: boolean('is_public').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
 
-// 3. PAGE CONTENT CHUNKS - Chunked content for efficient processing
-export const pageContentChunks = pgTable('page_content_chunks', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  pageId: uuid('page_id').notNull().references(() => crawledPages.id, { onDelete: 'cascade' }),
-  content: text('content').notNull(),
-  contentType: text('content_type').notNull().default('markdown'), // 'raw', 'markdown', 'processed'
-  chunkIndex: integer('chunk_index').notNull().default(0),
-  startPosition: integer('start_position'),
-  endPosition: integer('end_position'),
-  metadata: jsonb('metadata').$type<{
-    chunkIndex: number
-    startPosition: number
-    endPosition: number
-    extractionMethod?: string
-    qualityScore?: number
-  }>(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (table) => ({
-  // Foreign key index
-  pageIdIdx: index('page_content_chunks_page_id_idx').on(table.pageId),
-  // Chunk ordering
-  chunkOrderIdx: index('page_content_chunks_order_idx').on(table.pageId, table.chunkIndex),
-}))
+// Ensures we never have duplicate sources for the same scope.
+export const sourcesScopeIdx = uniqueIndex('sources_scope_idx').on(sources.entrypointUrl, sources.prefixUrl);
 
-// TypeScript types
-export type CrawlingJob = typeof crawlingJobs.$inferSelect
-export type NewCrawlingJob = typeof crawlingJobs.$inferInsert
-export type CrawledPage = typeof crawledPages.$inferSelect
-export type NewCrawledPage = typeof crawledPages.$inferInsert
-export type PageContentChunk = typeof pageContentChunks.$inferSelect
-export type NewPageContentChunk = typeof pageContentChunks.$inferInsert
+/**
+ * 3. CRAWLS
+ * An immutable record of a single crawl attempt for a source.
+ * This captures a snapshot in time.
+ */
+export const crawls = pgTable('crawls', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sourceId: uuid('source_id')
+    .references(() => sources.id)
+    .notNull(),
+  branch: text('branch'), // For versioned docs, e.g., 'main', 'v1.2'
+  state: crawlState('state').default('initial'),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  totalTokens: integer('total_tokens').default(0),
+  totalPages: integer('total_pages').default(0),
+  error: text('error'),
+});
 
-// Zod schemas for API validation
-export const newCrawlingJobSchema = z.object({
-  url: z.string().url(),
-  config: crawlConfigSchema.optional(),
-})
+// This partial unique index is the database-level guard against
+// redundant work. It prevents more than one crawl from being in the
+// 'running' state for the same source and branch.
+export const crawlsRunningScopeIdx = uniqueIndex('crawls_running_scope_idx')
+  .on(crawls.sourceId, crawls.branch)
+  .where(sql`state = 'running'`);
 
-export const crawlingJobUpdateSchema = z.object({
-  status: z.enum(['pending', 'running', 'completed', 'failed', 'partial_success']).optional(),
-  statusMessage: z.string().optional(),
-  pagesProcessed: z.number().optional(),
-  pagesFound: z.number().optional(),
-  totalWords: z.number().optional(),
-  finalMarkdown: z.string().optional(),
-  completedAt: z.date().optional(),
-})
+// A supporting index to quickly find the latest *finished* crawl,
+// which is needed to update the `latest_crawl_id` pointer.
+export const crawlsFinalizedIdx = index('crawls_finalized_idx')
+  .on(crawls.sourceId, crawls.branch, crawls.finishedAt)
+  .where(sql`state = 'finalized'`);
 
-export const newCrawledPageSchema = z.object({
-  jobId: z.string().uuid(),
-  url: z.string().url(),
-  urlHash: z.string(),
-  title: z.string().optional(),
-  status: z.enum(['pending', 'crawled', 'error', 'skipped']).optional(),
-  httpStatus: z.number().optional(),
-  errorMessage: z.string().optional(),
-  depth: z.number().min(0).default(0),
-  discoveredFrom: z.string().optional(),
-  qualityScore: z.number().min(0).max(100).optional(),
-  wordCount: z.number().min(0).optional(),
-})
+/**
+ * 4. PAGES
+ * The actual content. One row per crawled page, containing the
+ * cleaned, final markdown.
+ */
+export const pages = pgTable('pages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  crawlId: uuid('crawl_id')
+    .references(() => crawls.id)
+    .notNull(),
+  path: text('path').notNull(), // e.g., /guides/introduction
+  markdown: text('markdown').notNull(),
+  tokenCount: integer('token_count'),
+  orderIndex: integer('order_index'), // To preserve nav order
+  contentHash: text('content_hash'), // For future diff-based crawls
+});
 
-// User-scoped query helpers
-export const createUserScopedQueries = (userId: string) => ({
-  getUserJobs: () => sql`SELECT * FROM ${crawlingJobs} WHERE user_id = ${userId}`,
-  getUserJobById: (jobId: string) => 
-    sql`SELECT * FROM ${crawlingJobs} WHERE id = ${jobId} AND user_id = ${userId}`,
-  getUserPages: (jobId: string) => 
-    sql`SELECT p.* FROM ${crawledPages} p 
-        JOIN ${crawlingJobs} j ON p.job_id = j.id 
-        WHERE j.id = ${jobId} AND j.user_id = ${userId}`,
-})
+export const pagesLookupIdx = index('pages_crawl_path_idx').on(pages.crawlId, pages.path);
 
-// Migration helpers for transitioning from old schema
-export const migrationMapping = {
-  // Old table -> New table
-  jobs: crawlingJobs,
-  urls: crawledPages,
-  raw_content: pageContentChunks, // Raw content becomes first chunk
-  processed_content: pageContentChunks, // Processed content becomes additional chunks
-}
+/**
+ * 5. SUMMARIES
+ * An optional, LLM-generated summary of a full crawl. Kept in a
+ * separate table to avoid bloating the primary `crawls` table.
+ */
+export const summaries = pgTable('summaries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  crawlId: uuid('crawl_id')
+    .references(() => crawls.id)
+    .notNull()
+    .unique(),
+  markdown: text('markdown'),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
 
-// Drizzle relations for improved query ergonomics
-export const crawlingJobsRelations = relations(crawlingJobs, ({ many }) => ({
-  crawledPages: many(crawledPages),
-}))
+/**
+ * 6. SHARE_LINKS
+ * Powers the `docspasta.com/p/xyz` URLs. Can either point to a
+ * floating, always-latest source or a pinned, immutable crawl.
+ */
+export const shareLinks = pgTable('share_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  // Exactly one of these two should be non-null.
+  crawlId: uuid('crawl_id').references(() => crawls.id), // Pinned version
+  sourceId: uuid('source_id').references(() => sources.id), // Floating version
+  slug: text('slug').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
 
-export const crawledPagesRelations = relations(crawledPages, ({ one, many }) => ({
-  job: one(crawlingJobs, {
-    fields: [crawledPages.jobId],
-    references: [crawlingJobs.id],
-  }),
-  contentChunks: many(pageContentChunks),
-}))
-
-export const pageContentChunksRelations = relations(pageContentChunks, ({ one }) => ({
-  page: one(crawledPages, {
-    fields: [pageContentChunks.pageId],
-    references: [crawledPages.id],
-  }),
-}))
+export const shareLinksSlugIdx = uniqueIndex('share_links_slug_idx').on(shareLinks.slug);
