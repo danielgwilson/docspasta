@@ -1,23 +1,18 @@
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import path from 'path'
+import { config } from 'dotenv';
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import { resolve } from 'path';
+import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tsconfigPaths()],
   test: {
+    env: { ...config({ path: '.env.test' }).parsed },
     environment: 'jsdom',
-    globals: true,
-    envDir: '.',
-    env: {
-      NODE_ENV: 'test',
-    },
-    setupFiles: ['./src/tests/setup-eventsource-mock.ts', './src/tests/setup-integration.ts'],
-    testTimeout: 30000, // 30 seconds for integration tests
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': resolve(__dirname, './src'),
     },
   },
-  envPrefix: ['UPSTASH_', 'KV_', 'REDIS_', 'DATABASE_', 'POSTGRES_', 'NEON_'],
-})
+});

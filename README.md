@@ -1,36 +1,91 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Docspasta V2
+
+A modern web crawler designed specifically for documentation sites. Built with Next.js 15, PostgreSQL, and QStash for efficient serverless operation.
+
+## Features
+
+- 🚀 **V5 API** - Clean, RESTful API with resumable SSE streaming
+- 📊 **Database-driven state** - PostgreSQL for reliable state management
+- 🔄 **Resumable streams** - SSE with automatic reconnection support
+- 🎯 **Quality-focused crawling** - Intelligent content extraction and scoring
+- ⚡ **Serverless-ready** - Optimized for Vercel deployment
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
+- Node.js 18+
+- PostgreSQL database (Neon recommended)
+- QStash account for job queuing
+- pnpm package manager
+
+### Development Setup
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/yourusername/docspasta-next.git
+cd docspasta-next
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+pnpm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables:
+```bash
+cp .env.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Configure your database and QStash credentials in `.env.local`
 
-## Learn More
+5. Run database migrations:
+```bash
+pnpm db:migrate
+```
 
-To learn more about Next.js, take a look at the following resources:
+6. Start the development server:
+```bash
+pnpm dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open [http://localhost:3000](http://localhost:3000) to see the application.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture
 
-## Deploy on Vercel
+### V5 API Endpoints
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `POST /api/v5/crawl` - Start a new crawl job
+- `GET /api/v5/jobs/[id]/stream` - Real-time SSE progress stream
+- `GET /api/v5/jobs/[id]` - Get job details and results
+- `POST /api/v5/process` - QStash webhook endpoint (internal)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Technology Stack
+
+- **Frontend**: Next.js 15, React 19, Tailwind CSS, Framer Motion
+- **Backend**: PostgreSQL (Neon), QStash, Drizzle ORM
+- **Real-time**: Server-Sent Events with resumable-stream
+- **Deployment**: Optimized for Vercel
+
+## Testing
+
+```bash
+# Run all tests
+pnpm test
+
+# Run tests in watch mode
+pnpm test:watch
+
+# Run specific test file
+pnpm test src/tests/v5-api.test.ts
+```
+
+## Documentation
+
+- [Development Setup](./DEVELOPMENT_SETUP.md) - Detailed setup instructions
+- [QStash Setup](./QSTASH_SETUP.md) - Queue configuration guide
+- [V5 API Implementation](./V5_API_IMPLEMENTATION_SUMMARY.md) - Technical details
+
+## License
+
+MIT

@@ -1,14 +1,18 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  eslint: {
-    // Allow build to pass with linting warnings for demo
-    ignoreDuringBuilds: true,
+  output: 'standalone',
+  experimental: {
+    esmExternals: true,
   },
-  typescript: {
-    // Allow build to pass with TypeScript errors for demo
-    ignoreBuildErrors: true,
-  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 's3.amazonaws.com',
+      },
+    ],
+  }
 };
 
 export default nextConfig;

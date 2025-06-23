@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { v4 as uuidv4 } from 'uuid'
+
 
 export interface User {
   id: string
@@ -19,7 +19,7 @@ export async function getOrCreateAnonUser(): Promise<string> {
   
   if (!userId) {
     // Create new anonymous user ID
-    userId = `anon-${uuidv4()}`
+    userId = `anon-${crypto.randomUUID()}`
     
     // Set cookie with long expiration
     cookieStore.set('anon-user-id', userId, {
@@ -84,5 +84,19 @@ export async function getCurrentUser(request: NextRequest): Promise<User> {
   return {
     id: anonUserId,
     isAnonymous: true
+  }
+}
+
+// Simplified interface for getting user context in API routes
+export interface UserContext {
+  userId: string
+  isAnonymous: boolean
+}
+
+export async function getUserContext(request: NextRequest): Promise<UserContext> {
+  const user = await getCurrentUser(request)
+  return {
+    userId: user.id,
+    isAnonymous: user.isAnonymous
   }
 }

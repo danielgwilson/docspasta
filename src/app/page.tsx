@@ -5,145 +5,20 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Sparkles, ArrowRight, Globe, RefreshCw } from 'lucide-react'
-import { CrawlProgress } from '@/components/CrawlProgress'
+import { CrawlJobCard } from '@/components/CrawlJobCard'
+import { SuggestionsGrid } from '@/components/SuggestionsGrid'
+import { useActiveJobs } from '@/hooks/useActiveJobs'
 import { motion, AnimatePresence } from 'framer-motion'
-
-interface ActiveJob {
-  jobId: string
-  url: string
-  status?: string
-  createdAt?: string
-  completedAt?: string
-  pagesProcessed?: number
-  pagesFound?: number
-  totalWords?: number
-  // Batch state fields
-  totalProcessed?: number
-  totalDiscovered?: number
-  lastEventId?: string | null
-  error?: string | null
-}
 
 export default function Home() {
   const [url, setUrl] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([])
   const [error, setError] = useState('')
   const [forceRefresh, setForceRefresh] = useState(false)
-  const [isLoadingStates, setIsLoadingStates] = useState(false)
+  
+  // Use hook instead of localStorage for job management
+  const { activeJobs, isLoading: isLoadingJobs, error: jobsError, refetch } = useActiveJobs()
 
-  // Load jobs from localStorage on mount (for anonymous users)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedJobs = localStorage.getItem('docspasta-active-jobs')
-        if (savedJobs) {
-          const parsedJobs = JSON.parse(savedJobs)
-          // Validate the structure and keep only minimal data
-          if (Array.isArray(parsedJobs)) {
-            const validJobs = parsedJobs
-              .filter(job => job.jobId && job.url)
-              .map(job => ({
-                jobId: job.jobId,
-                url: job.url
-              }))
-            setActiveJobs(validJobs)
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load active jobs from localStorage:', err)
-      }
-    }
-  }, [])
-
-  // Fetch batch states when activeJobs changes (on mount or when new jobs are added)
-  useEffect(() => {
-    if (activeJobs.length === 0 || isLoadingStates) return
-
-    const fetchBatchStates = async () => {
-      setIsLoadingStates(true)
-      try {
-        console.log('🔄 Fetching batch states for', activeJobs.length, 'jobs')
-        
-        const response = await fetch('/api/v4/jobs/batch-state', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            jobIds: activeJobs.map(job => job.jobId)
-          })
-        })
-
-        if (!response.ok) {
-          console.error('Failed to fetch batch states:', response.status)
-          return
-        }
-
-        const data = await response.json()
-        console.log('📦 Batch states response:', data)
-
-        if (data.success && data.states) {
-          // Update activeJobs with the fetched states
-          setActiveJobs(prevJobs => 
-            prevJobs.map(job => {
-              const state = data.states[job.jobId]
-              if (state) {
-                return {
-                  ...job,
-                  status: state.status,
-                  totalProcessed: state.totalProcessed,
-                  totalDiscovered: state.totalDiscovered,
-                  lastEventId: state.lastEventId,
-                  error: state.error
-                }
-              }
-              return job
-            })
-          )
-        }
-
-        // Remove jobs that were not found
-        if (data.notFound && data.notFound.length > 0) {
-          console.log('🗑️ Removing not found jobs:', data.notFound)
-          setActiveJobs(prevJobs => 
-            prevJobs.filter(job => !data.notFound.includes(job.jobId))
-          )
-        }
-      } catch (error) {
-        console.error('Error fetching batch states:', error)
-      } finally {
-        setIsLoadingStates(false)
-      }
-    }
-
-    // Only fetch states if we don't already have them
-    const jobsWithoutStates = activeJobs.filter(job => !job.status)
-    if (jobsWithoutStates.length > 0) {
-      fetchBatchStates()
-    }
-  }, [activeJobs.length]) // Only depend on length to avoid infinite loops
-
-  // Save active jobs to localStorage whenever they change
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        if (activeJobs.length > 0) {
-          // Save only minimal data to keep localStorage lean
-          const jobsToSave = activeJobs.map(job => ({
-            jobId: job.jobId,
-            url: job.url
-          }))
-          localStorage.setItem('docspasta-active-jobs', JSON.stringify(jobsToSave))
-        } else {
-          // Clear localStorage when no active jobs
-          localStorage.removeItem('docspasta-active-jobs')
-        }
-      } catch (err) {
-        console.error('Failed to save active jobs to localStorage:', err)
-      }
-    }
-  }, [activeJobs])
 
   // Initialize dev processor in development
   useEffect(() => {
@@ -173,12 +48,19 @@ export default function Home() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/v4/jobs', {
+      const response = await fetch('/api/v5/crawl', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ url, force: forceRefresh })
+        body: JSON.stringify({ 
+          url,
+          config: {
+            maxDepth: 2,
+            maxPages: 50,
+            qualityThreshold: 20
+          }
+        })
       })
 
       const result = await response.json()
@@ -187,11 +69,8 @@ export default function Home() {
         throw new Error(result.error || 'Failed to start crawl')
       }
 
-      // Add to active jobs
-      setActiveJobs(prev => [...prev, {
-        jobId: result.data.jobId,
-        url: result.data.url
-      }])
+      // Refetch active jobs from backend
+      await refetch()
 
       // Clear input and reset force
       setUrl('')
@@ -208,9 +87,52 @@ export default function Home() {
     // Keep completed jobs visible until dismissed
   }
 
-  const handleJobDismiss = (jobId: string) => {
-    // Remove the job from activeJobs
-    setActiveJobs(prev => prev.filter(job => job.jobId !== jobId))
+  const handleJobDismiss = async (jobId: string) => {
+    // Job dismissal is handled by the backend, just refetch to update UI
+    await refetch()
+  }
+
+  const handleSuggestionSelect = (url: string) => {
+    setUrl(url)
+  }
+
+  const handleSuggestionCrawl = async (url: string) => {
+    setError('')
+    setIsLoading(true)
+
+    try {
+      const response = await fetch('/api/v5/crawl', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          url,
+          config: {
+            maxDepth: 2,
+            maxPages: 50,
+            qualityThreshold: 20
+          }
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to start crawl')
+      }
+
+      // Refetch active jobs from backend
+      await refetch()
+
+      // Clear input and reset force
+      setUrl('')
+      setForceRefresh(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start crawl')
+    } finally {
+      setIsLoading(false)
+    }
   }
   
   return (
@@ -329,13 +251,13 @@ export default function Home() {
               </label>
             </div>
             
-            {error && (
+            {(error || jobsError) && (
               <motion.p 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className="text-sm text-red-600 dark:text-red-400"
               >
-                {error}
+                {error || jobsError}
               </motion.p>
             )}
           </motion.form>
@@ -353,25 +275,24 @@ export default function Home() {
                   <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300">
                     Active Crawls
                   </h2>
-                  {isLoadingStates && (
+                  {isLoadingJobs && (
                     <div className="flex items-center gap-2 text-sm text-gray-500">
                       <RefreshCw className="h-4 w-4 animate-spin" />
-                      Loading states...
+                      Loading jobs...
                     </div>
                   )}
                 </div>
                 <div className="space-y-4">
                   {activeJobs.map((job) => (
                     <motion.div
-                      key={job.jobId}
+                      key={job.id}
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
                       layout
                     >
-                      <CrawlProgress
-                        jobId={job.jobId}
-                        url={job.url}
+                      <CrawlJobCard
+                        job={job}
                         onDismiss={handleJobDismiss}
                       />
                     </motion.div>
@@ -381,7 +302,7 @@ export default function Home() {
             )}
           </AnimatePresence>
 
-          {/* Example URLs */}
+          {/* Suggestion Cards */}
           {activeJobs.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -389,27 +310,11 @@ export default function Home() {
               transition={{ delay: 0.3 }}
               className="pt-8"
             >
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                Try these examples:
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {[
-                  'https://docs.stripe.com',
-                  'https://tailwindcss.com/docs',
-                  'https://react.dev',
-                  'https://nextjs.org/docs'
-                ].map((exampleUrl) => (
-                  <Button
-                    key={exampleUrl}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setUrl(exampleUrl)}
-                    className="text-xs"
-                  >
-                    {new URL(exampleUrl).hostname}
-                  </Button>
-                ))}
-              </div>
+              <SuggestionsGrid
+                onSelect={handleSuggestionSelect}
+                onStartCrawl={handleSuggestionCrawl}
+                isLoading={isLoading}
+              />
             </motion.div>
           )}
         </div>

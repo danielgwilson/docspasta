@@ -11,6 +11,27 @@ const compat = new FlatCompat({
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    rules: {
+      // Function style rules - make them warnings instead of errors for easier migration
+      "func-style": ["warn", "expression", { allowArrowFunctions: true }],
+      "prefer-arrow-callback": "warn",
+      "arrow-body-style": ["warn", "as-needed"],
+    },
+  },
+  {
+    ignores: [
+      '.next',
+      '.cache',
+      'package-lock.json',
+      'public',
+      'node_modules',
+      'next-env.d.ts',
+      'next.config.ts',
+      'src/generated/gql',
+    ],
+  },
 ];
 
 export default eslintConfig;
+

@@ -1,183 +1,198 @@
-import { pgTable, text, timestamp, integer, jsonb, boolean, serial } from 'drizzle-orm/pg-core'
-import { sql } from 'drizzle-orm'
+import { pgTable, text, timestamp, integer, jsonb, pgEnum, uuid, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { sql, eq } from 'drizzle-orm'
+import { relations } from 'drizzle-orm'
+import { z } from 'zod'
 
 /**
- * Database schema for persistent crawl job state and SSE events
- * Designed for resilient SSE connections that survive server restarts
+ * DOCSPASTA V2 REBUILD - Clean 3-Table Architecture
+ * Based on Gemini's analysis with production-ready patterns
  */
 
-// Crawl jobs table - main persistent state
-export const crawlJobs = pgTable('crawl_jobs', {
-  // Primary identification
-  id: text('id').primaryKey(), // UUID format crawl IDs - TEXT is optimal in modern PostgreSQL
+// Status enums for type safety
+export const jobStatusEnum = pgEnum('job_status', [
+  'pending',
+  'running', 
+  'completed',
+  'failed',
+  'partial_success'
+])
+
+export const pageStatusEnum = pgEnum('page_status', [
+  'pending',
+  'crawled', 
+  'error',
+  'skipped'
+])
+
+// Crawl configuration schema for validation
+export const crawlConfigSchema = z.object({
+  maxDepth: z.number().min(1).max(10).default(2),
+  maxPages: z.number().min(1).max(1000).default(50),
+  qualityThreshold: z.number().min(0).max(100).default(20),
+  includeSelectors: z.array(z.string()).optional(),
+  excludeSelectors: z.array(z.string()).optional(),
+  respectRobots: z.boolean().default(true),
+  followSitemaps: z.boolean().default(true),
+})
+
+export type CrawlConfig = z.infer<typeof crawlConfigSchema>
+
+// 1. CRAWLING JOBS - Main job metadata and configuration
+export const crawlingJobs = pgTable('crawling_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull(), // User isolation
   url: text('url').notNull(),
-  
-  // Status tracking
-  status: text('status').notNull().default('active'), // 'active' | 'completed' | 'failed' | 'cancelled'
-  
-  // Timestamps
-  createdAt: timestamp('created_at').notNull().default(sql`NOW()`),
-  completedAt: timestamp('completed_at'),
-  updatedAt: timestamp('updated_at').notNull().default(sql`NOW()`),
-  
-  // Progress counters
-  totalDiscovered: integer('total_discovered').notNull().default(0), // URLs found via sitemap/robots
-  totalQueued: integer('total_queued').notNull().default(0),         // URLs that passed filters
-  totalProcessed: integer('total_processed').notNull().default(0),   // URLs actually crawled
-  totalFiltered: integer('total_filtered').notNull().default(0),     // URLs filtered out
-  totalSkipped: integer('total_skipped').notNull().default(0),       // Duplicate URLs skipped
-  totalFailed: integer('total_failed').notNull().default(0),         // URLs that failed to crawl
-  
-  // Progress state (for UI display)
-  progress: jsonb('progress').notNull().default('{}'), // CrawlProgress object
-  
-  // Results and content
-  results: jsonb('results').notNull().default('[]'), // Array of CrawlResult objects
-  markdown: text('markdown'), // Combined markdown content
-  
-  // Error handling
-  errorMessage: text('error_message'),
-  
-  // Discovery phase tracking
-  discoveryComplete: boolean('discovery_complete').notNull().default(false),
-})
+  config: jsonb('config').$type<CrawlConfig>().notNull().default({}),
+  status: jobStatusEnum('status').notNull().default('pending'),
+  statusMessage: text('status_message'), // For error details
 
-// SSE events table - for resumable streams
-export const sseEvents = pgTable('sse_events', {
-  id: serial('id').primaryKey(),
-  
-  // Foreign key to crawl job
-  crawlId: text('crawl_id').notNull().references(() => crawlJobs.id, { onDelete: 'cascade' }),
-  
-  // Event identification for resumable streams
-  eventId: text('event_id').notNull().unique(), // Format: crawlId-timestamp-counter
-  
-  // Event metadata  
-  eventType: text('event_type').notNull(), // 'progress' | 'batch-progress' | 'completion' | 'error' | 'heartbeat'
-  eventData: jsonb('event_data').notNull(), // Complete event payload
-  
-  // Timing
-  createdAt: timestamp('created_at').notNull().default(sql`NOW()`),
-})
-
-// V3 Serverless Architecture Tables
-// Job state machine table for serverless architecture
-export const crawlJobsV3 = pgTable('crawl_jobs_v3', {
-  id: text('id').primaryKey().default(sql`gen_random_uuid()`),
-  status: text('status').notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-  
-  // Job configuration
-  initialUrl: text('initial_url').notNull(),
-  maxPages: integer('max_pages').notNull().default(50),
-  maxDepth: integer('max_depth').notNull().default(2),
-  qualityThreshold: integer('quality_threshold').notNull().default(20),
-  
-  // Progress tracking
-  totalUrls: integer('total_urls').notNull().default(0),
-  processedUrls: integer('processed_urls').notNull().default(0),
-  failedUrls: integer('failed_urls').notNull().default(0),
-  discoveredUrls: integer('discovered_urls').notNull().default(0),
-  
-  // State management
-  currentStep: text('current_step').notNull().default('init'), // 'init' | 'discovery' | 'processing' | 'finalizing' | 'done'
-  errorDetails: jsonb('error_details'),
-  
-  // Results
-  results: jsonb('results').default('[]'),
   finalMarkdown: text('final_markdown'),
-  
-  // Timestamps
-  createdAt: timestamp('created_at').notNull().default(sql`NOW()`),
-  updatedAt: timestamp('updated_at').notNull().default(sql`NOW()`),
-  startedAt: timestamp('started_at'),
+  // V5 State versioning for efficient SSE streaming
+  stateVersion: integer('state_version').notNull().default(1),
+  progressSummary: jsonb('progress_summary').$type<{
+    totalProcessed: number
+    totalDiscovered: number
+    totalWords: number
+    discoveredUrls: number
+    failedUrls: number
+  }>().notNull().default({}),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
   completedAt: timestamp('completed_at'),
-})
+}, (table) => ({
+  // Critical indexes for performance
+  userIdIdx: index('crawling_jobs_user_id_idx').on(table.userId),
+  statusIdx: index('crawling_jobs_status_idx').on(table.status),
+  createdAtIdx: index('crawling_jobs_created_at_idx').on(table.createdAt),
+  // Partial index for worker queries (pending jobs only)
+  pendingJobsIdx: index('crawling_jobs_pending_idx').on(table.id).where(sql`status = 'pending'`),
+}))
 
-// URL processing queue table for atomic operations
-export const jobUrlsV3 = pgTable('job_urls_v3', {
-  id: text('id').primaryKey().default(sql`gen_random_uuid()`),
-  jobId: text('job_id').notNull().references(() => crawlJobsV3.id, { onDelete: 'cascade' }),
+// 2. CRAWLED PAGES - Individual page metadata and status
+export const crawledPages = pgTable('crawled_pages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobId: uuid('job_id').notNull().references(() => crawlingJobs.id, { onDelete: 'cascade' }),
   url: text('url').notNull(),
-  status: text('status').notNull().default('pending'), // 'pending' | 'processing' | 'completed' | 'failed'
-  
-  // Processing details
-  retryCount: integer('retry_count').default(0),
-  lastAttemptAt: timestamp('last_attempt_at'),
-  processingStartedAt: timestamp('processing_started_at'),
-  
-  // Results
-  result: jsonb('result'),
+  urlHash: text('url_hash').notNull(), // For deduplication
+  title: text('title'),
+  status: pageStatusEnum('status').notNull().default('pending'),
+  httpStatus: integer('http_status'), // HTTP response code
   errorMessage: text('error_message'),
-  
-  // Metadata
-  discoveredFrom: text('discovered_from'), // which URL discovered this one
   depth: integer('depth').notNull().default(0),
-  
-  createdAt: timestamp('created_at').notNull().default(sql`NOW()`),
+  discoveredFrom: text('discovered_from'), // Source URL
+  qualityScore: integer('quality_score').default(0),
+  wordCount: integer('word_count').default(0),
+  crawledAt: timestamp('crawled_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  // Foreign key index (Drizzle doesn't auto-create these!)
+  jobIdIdx: index('crawled_pages_job_id_idx').on(table.jobId),
+  // URL deduplication index
+  urlHashIdx: index('crawled_pages_url_hash_idx').on(table.urlHash),
+  // Status queries
+  statusIdx: index('crawled_pages_status_idx').on(table.status),
+  // Unique constraint per job (CRITICAL: prevents duplicate URLs per job)
+  uniqueJobUrl: uniqueIndex('crawled_pages_job_url_unique').on(table.jobId, table.urlHash),
+}))
+
+// 3. PAGE CONTENT CHUNKS - Chunked content for efficient processing
+export const pageContentChunks = pgTable('page_content_chunks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pageId: uuid('page_id').notNull().references(() => crawledPages.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  contentType: text('content_type').notNull().default('markdown'), // 'raw', 'markdown', 'processed'
+  chunkIndex: integer('chunk_index').notNull().default(0),
+  startPosition: integer('start_position'),
+  endPosition: integer('end_position'),
+  metadata: jsonb('metadata').$type<{
+    chunkIndex: number
+    startPosition: number
+    endPosition: number
+    extractionMethod?: string
+    qualityScore?: number
+  }>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  // Foreign key index
+  pageIdIdx: index('page_content_chunks_page_id_idx').on(table.pageId),
+  // Chunk ordering
+  chunkOrderIdx: index('page_content_chunks_order_idx').on(table.pageId, table.chunkIndex),
+}))
+
+// TypeScript types
+export type CrawlingJob = typeof crawlingJobs.$inferSelect
+export type NewCrawlingJob = typeof crawlingJobs.$inferInsert
+export type CrawledPage = typeof crawledPages.$inferSelect
+export type NewCrawledPage = typeof crawledPages.$inferInsert
+export type PageContentChunk = typeof pageContentChunks.$inferSelect
+export type NewPageContentChunk = typeof pageContentChunks.$inferInsert
+
+// Zod schemas for API validation
+export const newCrawlingJobSchema = z.object({
+  url: z.string().url(),
+  config: crawlConfigSchema.optional(),
 })
 
-// Types for TypeScript safety
-export type CrawlJob = typeof crawlJobs.$inferSelect
-export type NewCrawlJob = typeof crawlJobs.$inferInsert
-export type SSEEvent = typeof sseEvents.$inferSelect
-export type NewSSEEvent = typeof sseEvents.$inferInsert
+export const crawlingJobUpdateSchema = z.object({
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'partial_success']).optional(),
+  statusMessage: z.string().optional(),
+  pagesProcessed: z.number().optional(),
+  pagesFound: z.number().optional(),
+  totalWords: z.number().optional(),
+  finalMarkdown: z.string().optional(),
+  completedAt: z.date().optional(),
+})
 
-// V3 Types
-export type CrawlJobV3 = typeof crawlJobsV3.$inferSelect
-export type NewCrawlJobV3 = typeof crawlJobsV3.$inferInsert
-export type JobUrlV3 = typeof jobUrlsV3.$inferSelect
-export type NewJobUrlV3 = typeof jobUrlsV3.$inferInsert
+export const newCrawledPageSchema = z.object({
+  jobId: z.string().uuid(),
+  url: z.string().url(),
+  urlHash: z.string(),
+  title: z.string().optional(),
+  status: z.enum(['pending', 'crawled', 'error', 'skipped']).optional(),
+  httpStatus: z.number().optional(),
+  errorMessage: z.string().optional(),
+  depth: z.number().min(0).default(0),
+  discoveredFrom: z.string().optional(),
+  qualityScore: z.number().min(0).max(100).optional(),
+  wordCount: z.number().min(0).optional(),
+})
 
-// Crawl job status enum for type safety
-export type CrawlJobStatus = 'active' | 'completed' | 'failed' | 'cancelled'
+// User-scoped query helpers
+export const createUserScopedQueries = (userId: string) => ({
+  getUserJobs: () => sql`SELECT * FROM ${crawlingJobs} WHERE user_id = ${userId}`,
+  getUserJobById: (jobId: string) => 
+    sql`SELECT * FROM ${crawlingJobs} WHERE id = ${jobId} AND user_id = ${userId}`,
+  getUserPages: (jobId: string) => 
+    sql`SELECT p.* FROM ${crawledPages} p 
+        JOIN ${crawlingJobs} j ON p.job_id = j.id 
+        WHERE j.id = ${jobId} AND j.user_id = ${userId}`,
+})
 
-// Progress structure (matches existing crawler types)
-export interface CrawlProgress {
-  phase: string
-  processed: number
-  total: number
-  percentage: number
-  discoveredUrls?: number
-  failedUrls?: number
-  currentActivity?: string
-  currentUrl?: string
+// Migration helpers for transitioning from old schema
+export const migrationMapping = {
+  // Old table -> New table
+  jobs: crawlingJobs,
+  urls: crawledPages,
+  raw_content: pageContentChunks, // Raw content becomes first chunk
+  processed_content: pageContentChunks, // Processed content becomes additional chunks
 }
 
-// Result structure (matches existing crawler types)
-export interface CrawlResult {
-  url: string
-  title: string
-  content: string
-  success: boolean
-  statusCode?: number
-  error?: string
-}
+// Drizzle relations for improved query ergonomics
+export const crawlingJobsRelations = relations(crawlingJobs, ({ many }) => ({
+  crawledPages: many(crawledPages),
+}))
 
-// SSE event data structure
-export interface SSEEventData {
-  type: string
-  crawlId?: string
-  status?: string
-  phase?: string
-  processed?: number
-  total?: number
-  percentage?: number
-  discoveredUrls?: number
-  failedUrls?: number
-  currentUrl?: string
-  currentActivity?: string
-  results?: CrawlResult[]
-  markdown?: string
-  error?: string
-  message?: string
-  timestamp: number
-  // For nested progress data
-  progress?: CrawlProgress
-  data?: {
-    id?: string
-    status?: string
-    markdown?: string
-    results?: CrawlResult[]
-    progress?: CrawlProgress
-  }
-}
+export const crawledPagesRelations = relations(crawledPages, ({ one, many }) => ({
+  job: one(crawlingJobs, {
+    fields: [crawledPages.jobId],
+    references: [crawlingJobs.id],
+  }),
+  contentChunks: many(pageContentChunks),
+}))
+
+export const pageContentChunksRelations = relations(pageContentChunks, ({ one }) => ({
+  page: one(crawledPages, {
+    fields: [pageContentChunks.pageId],
+    references: [crawledPages.id],
+  }),
+}))

@@ -14,7 +14,7 @@
  */
 export async function fetchBatchJobStates(jobIds: string[]) {
   try {
-    const response = await fetch('/api/v4/jobs/batch-state', {
+    const response = await fetch('/api/v5/jobs/batch-state', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
