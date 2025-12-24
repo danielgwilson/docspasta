@@ -35,7 +35,7 @@
     "isomorphic-dompurify": "^2.25.0",
     "lucide-react": "^0.511.0",
     "luxon": "^3.6.1",
-    "next": "15.3.3",
+    "next": "15.3.8",
     "normalize-url": "^8.0.2",
     "p-queue": "^8.1.0",
     "pg": "^8.16.2",
